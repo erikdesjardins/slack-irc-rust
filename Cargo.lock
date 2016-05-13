@@ -1,0 +1,4 @@
+[root]
+name = "slack_irc_rust"
+version = "0.1.0"
+
