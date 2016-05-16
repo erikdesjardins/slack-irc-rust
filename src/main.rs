@@ -212,8 +212,8 @@ fn make_slack_action(username: Option<String>, text: String) -> String {
 
 fn main() {
     let (slack_tx, slack_rx) = channel();
-
     let (irc_tx, irc_rx) = channel();
+
     let slack_thread = thread::Builder::new().name("slack".to_owned()).spawn(move || {
         let mut handler = SlackHandler { chan: &irc_tx };
         let mut cli = slack::RtmClient::new(&"SLACK_TOKEN_REPLACE_ME");
