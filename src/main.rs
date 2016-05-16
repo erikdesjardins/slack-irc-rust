@@ -173,10 +173,8 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
                 },
                 _ => (),
             },
-            Ok(&slack::Event::PresenceChange { ref user, ref presence }) => {
-               if user == slack_user {
-                   self.chan.send(SlackToIrc::Away(presence == "active")).unwrap();
-               }
+            Ok(&slack::Event::PresenceChange { ref user, ref presence }) if user == slack_user => {
+               self.chan.send(SlackToIrc::Away(presence == "active")).unwrap();
             },
             _ => (),
         }
