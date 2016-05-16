@@ -352,10 +352,18 @@ fn main() {
 
         for msg in irc_rx.iter() {
             match msg {
-                SlackToIrc::Message { to, msg } => server.send_privmsg(&to, &msg).unwrap(),
-                SlackToIrc::MeMessage { to, msg } => server.send_privmsg(&to, &format!("\x01ACTION {}\x01", msg)).unwrap(),
-                SlackToIrc::Raw(msg) => server.send(Command::Raw(msg, vec![], None)).unwrap(),
-                SlackToIrc::Away(is_away) => server.send(Command::AWAY(Some(if is_away { " ".to_owned() } else { "".to_owned() }))).unwrap(),
+                SlackToIrc::Message { to, msg } => {
+                    server.send_privmsg(&to, &msg).unwrap();
+                },
+                SlackToIrc::MeMessage { to, msg } => {
+                    server.send_privmsg(&to, &format!("\x01ACTION {}\x01", msg)).unwrap();
+                },
+                SlackToIrc::Raw(msg) => {
+                    server.send(Command::Raw(msg, vec![], None)).unwrap();
+                },
+                SlackToIrc::Away(is_away) => {
+                    server.send(Command::AWAY(Some(if is_away { " ".to_owned() } else { "".to_owned() }))).unwrap();
+                },
             }
         }
 
