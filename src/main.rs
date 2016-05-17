@@ -221,7 +221,7 @@ fn main() {
         let all_channels = ["ALL_CHANNELS_REPLACE_ME"];
         let dm_channel = "SLACK_DM_CHANNEL_TODO_REPLACE_ME";
 
-        for msg in slack_rx.iter() {
+        for msg in slack_rx {
             match msg {
                 IrcToSlack::Message { to, from, msg } => {
                     let to = if to.starts_with("#") {
@@ -262,12 +262,12 @@ fn main() {
                 IrcToSlack::Quit { nick, reason } => {
                     let reason = &reason.unwrap_or("".to_owned());
 
-                    for chan in all_channels.iter() {
+                    for chan in &all_channels {
                         cli.send_message(&chan, &format!("*{}* has quit (_{}_)", nick, reason)).unwrap();
                     }
                 },
                 IrcToSlack::Nick { old_nick, new_nick } => {
-                    for chan in all_channels.iter() {
+                    for chan in &all_channels {
                         cli.send_message(&chan, &format!("*{}* is now known as *{}*", old_nick, new_nick)).unwrap();
                     }
                 },
@@ -348,7 +348,7 @@ fn main() {
             }).unwrap()
         };
 
-        for msg in irc_rx.iter() {
+        for msg in irc_rx {
             match msg {
                 SlackToIrc::Message { to, msg } => {
                     server.send_privmsg(&to, &msg).unwrap();
