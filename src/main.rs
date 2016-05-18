@@ -124,7 +124,7 @@ fn parse_slack_text(text: &str, cli: &slack::RtmClient) -> String {
                 if let Some(&emoji) = EMOJIS.get(captures.at(1).unwrap()) {
                     emoji.to_owned()
                 } else {
-                    captures.at(1).unwrap().to_owned()
+                    captures.at(0).unwrap().to_owned()
                 }
             })),
         ];
