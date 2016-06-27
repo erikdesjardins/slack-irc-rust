@@ -224,10 +224,10 @@ fn main() {
         for msg in slack_rx {
             match msg {
                 IrcToSlack::Message { to, from, msg } => {
-                    let to = if to.starts_with("#") {
+                    let to: &str = if to.starts_with("#") {
                         dm_channel
                     } else {
-                        &to[..]
+                        &to
                     };
 
                     let msg = make_slack_action(from, msg);
