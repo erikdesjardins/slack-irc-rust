@@ -149,13 +149,12 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
             Ok(&slack::Event::Message(ref message)) => match message {
                 &slack::Message::Standard { channel: Some(ref channel), user: Some(ref user), text: Some(ref text), .. } if user == slack_user => {
                     lazy_static!{
-                        static ref COMMAND_RE: Regex = Regex::new(r"^%[A-Z]{3,}\s\S").unwrap();
                         static ref PM_RE: Regex = Regex::new(r"^(\S+):\s+(.+)").unwrap();
                     }
 
                     let text = parse_slack_text(&text, cli);
 
-                    if COMMAND_RE.is_match(&text) {
+                    if text.starts_with("%") {
                         self.chan.send(SlackToIrc::Raw(text[1..].to_owned())).unwrap();
                         cli.send_message(channel, "_sent raw command_").unwrap();
                     } else if channel == bot_channel {
