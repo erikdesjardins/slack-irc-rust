@@ -285,9 +285,9 @@ fn main() {
 
     let irc_thread = thread::Builder::new().name("irc".to_owned()).spawn(move || {
         let config = Config {
-            nickname: Some(format!("NICK_REPLACE_ME")),
-            server: Some(format!("SERVER_REPLACE_ME")),
-            channels: Some(vec![format!("CHANNELS_REPLACE_ME")]),
+            nickname: Some("NICK_REPLACE_ME".to_owned()),
+            server: Some("SERVER_REPLACE_ME".to_owned()),
+            channels: Some(vec!["CHANNELS_REPLACE_ME".to_owned()]),
             port: Some(6697),
             use_ssl: Some(true),
             ..Default::default()
