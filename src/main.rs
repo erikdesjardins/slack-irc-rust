@@ -212,10 +212,16 @@ fn main() {
     let (irc_tx, irc_rx) = channel();
 
     let slack_thread = thread::Builder::new().name("slack".to_owned()).spawn(move || {
-        let mut handler = SlackHandler { chan: &irc_tx };
-        let mut cli = slack::RtmClient::new(&"SLACK_TOKEN_REPLACE_ME");
+        let slack_token = "SLACK_TOKEN_REPLACE_ME";
 
-        cli.login_and_run(&mut handler).unwrap();
+        let recv_thread = thread::Builder::new().name("slack_recv".to_owned()).spawn(move || {
+            let mut handler = SlackHandler { chan: &irc_tx };
+            let mut cli = slack::RtmClient::new(&slack_token);
+            cli.login_and_run(&mut handler).unwrap();
+        }).unwrap();
+
+        let mut cli = slack::RtmClient::new(&slack_token);
+        cli.login().unwrap();
 
         let all_channels = ["ALL_CHANNELS_REPLACE_ME"];
         let dm_channel = "SLACK_DM_CHANNEL_TODO_REPLACE_ME";
@@ -280,6 +286,8 @@ fn main() {
                 },
             }
         }
+
+        recv_thread.join().unwrap();
     }).unwrap();
 
     let irc_thread = thread::Builder::new().name("irc".to_owned()).spawn(move || {
