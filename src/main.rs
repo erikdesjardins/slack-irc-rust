@@ -40,9 +40,9 @@ enum SlackToIrc {
 enum IrcToSlack {
     Message { to: String, from: Option<String>, msg: String },
     Topic { chan: String, topic: Option<String> },
-    Kick { by: Option<String>, chans: String, nicks: String, reason: Option<String> },
-    Join { nick: String, chans: String },
-    Part { nick: String, chans: String, reason: Option<String> },
+    Kick { by: Option<String>, chans: Vec<String>, nicks: Vec<String>, reason: Option<String> },
+    Join { nick: String, chans: Vec<String> },
+    Part { nick: String, chans: Vec<String>, reason: Option<String> },
     Quit { nick: String, reason: Option<String> },
     Nick { old_nick: String, new_nick: String },
     Mode { by: Option<String>, name: String, modes: String, params: Option<String> },
@@ -313,21 +313,21 @@ fn main() {
                         let by = &by.unwrap_or("server".to_owned());
                         let reason = &reason.unwrap_or("".to_owned());
 
-                        for chan in chans.split(",") {
-                            for nick in nicks.split(",") {
+                        for chan in chans {
+                            for nick in &nicks {
                                 post_message(&cli, &c.slack_token, &chan, &format!("*{}* has kicked *{}* (_{}_)", by, nick, reason), None);
                             }
                         }
                     },
                     IrcToSlack::Join { nick, chans } => {
-                        for chan in chans.split(",") {
+                        for chan in chans {
                             post_message(&cli, &c.slack_token, &chan, &format!("*{}* has joined", nick), None);
                         }
                     },
                     IrcToSlack::Part { nick, chans, reason } => {
                         let reason = &reason.unwrap_or("".to_owned());
 
-                        for chan in chans.split(",") {
+                        for chan in chans {
                             post_message(&cli, &c.slack_token, &chan, &format!("*{}* has left (_{}_)", nick, reason), None);
                         }
                     },
@@ -400,13 +400,18 @@ fn main() {
                                 slack_tx.send(IrcToSlack::Topic { chan: channel, topic: topic }).unwrap();
                             },
                             Command::KICK(channels, users, reason) => {
-                                slack_tx.send(IrcToSlack::Kick { by: message.prefix, chans: channels, nicks: users, reason: reason }).unwrap();
+                                slack_tx.send(IrcToSlack::Kick {
+                                    by: message.prefix,
+                                    chans: channels.split(",").map(|s| s.to_owned()).collect(),
+                                    nicks: users.split(",").map(|s| s.to_owned()).collect(),
+                                    reason: reason
+                                }).unwrap();
                             },
                             Command::JOIN(channels, _, _) => {
-                                slack_tx.send(IrcToSlack::Join { nick: message.prefix.unwrap(), chans: channels }).unwrap();
+                                slack_tx.send(IrcToSlack::Join { nick: message.prefix.unwrap(), chans: channels.split(",").map(|s| s.to_owned()).collect() }).unwrap();
                             },
                             Command::PART(channels, reason) => {
-                                slack_tx.send(IrcToSlack::Part { nick: message.prefix.unwrap(), chans: channels, reason: reason }).unwrap();
+                                slack_tx.send(IrcToSlack::Part { nick: message.prefix.unwrap(), chans: channels.split(",").map(|s| s.to_owned()).collect(), reason: reason }).unwrap();
                             },
                             Command::QUIT(reason) => {
                                 slack_tx.send(IrcToSlack::Quit { nick: message.prefix.unwrap(), reason: reason }).unwrap();
