@@ -1,8 +1,10 @@
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate log;
 extern crate irc;
 extern crate hyper;
 extern crate slack;
-#[macro_use] extern crate lazy_static;
+#[macro_use]
+extern crate lazy_static;
 extern crate regex;
 extern crate toml;
 extern crate rustc_serialize;
@@ -84,7 +86,7 @@ fn log_err<T, E: Debug>(res: Result<T, E>) {
 }
 
 fn parse_slack_text(text: &str, cli: &slack::RtmClient) -> String {
-    lazy_static!{
+    lazy_static! {
         static ref REPLACEMENTS: Vec<(Regex, &'static str)> = vec![
             (Regex::new(r"\n|\r\n|\r").unwrap(), " "),
             (Regex::new(r"&amp;").unwrap(), "&"),
@@ -180,7 +182,7 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
         match event {
             Ok(&slack::Event::Message(ref message)) => match message {
                 &slack::Message::Standard { channel: Some(ref channel), user: Some(ref user), text: Some(ref text), .. } if user == self.user_id => {
-                    lazy_static!{
+                    lazy_static! {
                         static ref PM_RE: Regex = Regex::new(r"^(\S+):\s+(.+)").unwrap();
                     }
 
@@ -404,9 +406,9 @@ fn main() {
                                 slack_tx.send(IrcToSlack::Error(msg)).unwrap();
                             },
                             Command::PRIVMSG(to, text) | Command::NOTICE(to, text) => {
-                                lazy_static!{
-                                static ref ACTION_RE: Regex = Regex::new("^\x01ACTION (.+)\x01$").unwrap();
-                            }
+                                lazy_static! {
+                                    static ref ACTION_RE: Regex = Regex::new("^\x01ACTION (.+)\x01$").unwrap();
+                                }
 
                                 if ACTION_RE.is_match(&text) {
                                     slack_tx.send(IrcToSlack::Message {
