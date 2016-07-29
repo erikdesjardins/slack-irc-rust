@@ -19,7 +19,7 @@ use std::fs::File;
 use std::io::prelude::*;
 
 use log::{LogRecord, LogMetadata, LogLevelFilter};
-use irc::client::prelude::{Command, IrcServer, Server, ServerExt};
+use irc::client::prelude::{Command, Response, IrcServer, Server, ServerExt};
 use regex::Regex;
 
 struct StdoutLogger;
@@ -55,7 +55,7 @@ enum SlackToIrc {
 #[derive(Debug)]
 enum IrcToSlack {
     Message { to: String, from: Option<String>, msg: String },
-    Topic { chan: String, topic: Option<String> },
+    Topic { by: Option<String>, chan: String, topic: Option<String> },
     Kick { by: Option<String>, chans: Vec<String>, nicks: Vec<String>, reason: Option<String> },
     Join { nick: String, chans: Vec<String> },
     Part { nick: String, chans: Vec<String>, reason: Option<String> },
@@ -327,8 +327,10 @@ fn main() {
 
                         post_message(&cli, &c.slack_token, to, &msg, from);
                     },
-                    IrcToSlack::Topic { chan, topic } => {
-                        info!("{} - {:?}", chan, topic);
+                    IrcToSlack::Topic { by, chan, topic } => {
+                        if let Some(by) = by {
+                            post_message(&cli, &c.slack_token, &chan, &format!("*{}* has changed the topic", by), None);
+                        }
                         cli.set_topic(&chan, &topic.unwrap_or("".to_owned())).unwrap();
                     },
                     IrcToSlack::Kick { by, chans, nicks, reason } => {
@@ -421,7 +423,8 @@ fn main() {
                                 }
                             },
                             Command::TOPIC(channel, topic) => {
-                                slack_tx.send(IrcToSlack::Topic { chan: channel, topic: topic }).unwrap();
+                                // topic set by a user while we're in the channel
+                                slack_tx.send(IrcToSlack::Topic { by: sender, chan: channel, topic: topic }).unwrap();
                             },
                             Command::KICK(channels, users, reason) => {
                                 slack_tx.send(IrcToSlack::Kick {
@@ -445,8 +448,19 @@ fn main() {
                             },
                             Command::MODE(name, modes, params) => {
                                 slack_tx.send(IrcToSlack::Mode { by: sender, name: name, modes: modes, params: params }).unwrap();
-                            }
-                            _ => (),
+                            },
+                            Command::Response(resp, args, suffix) => match resp {
+                                Response::RPL_NOTOPIC | Response::RPL_TOPIC => {
+                                    // response to topic request
+                                    slack_tx.send(IrcToSlack::Topic { by: None, chan: args[1].clone(), topic: suffix }).unwrap();
+                                },
+                                _ => {
+                                    debug!("{:?}", Command::Response(resp, args, suffix));
+                                },
+                            },
+                            msg => {
+                                debug!("{:?}", msg);
+                            },
                         }
                     }
                 }).unwrap()
