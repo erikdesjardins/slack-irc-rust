@@ -216,7 +216,13 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
 
 fn post_message(cli: &slack::RtmClient, token: &str, to: &str, text: &str, username: Option<&str>) {
     let to: &str = if to.starts_with("#") {
-        &cli.get_channel_id(&to[1..]).unwrap()
+        match cli.get_channel_id(&to[1..]) {
+            Some(id) => id,
+            None => {
+                println!("[ERROR] Failed to find channel '{}'", &to[1..]);
+                return;
+            },
+        }
     } else {
         to
     };
