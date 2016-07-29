@@ -13,3 +13,6 @@
 # IntelliJ
 /.idea
 *.iml
+
+# Config
+config.toml
