@@ -343,8 +343,6 @@ fn main() {
             let config = irc::client::data::Config {
                 nickname: Some(c.irc_nick.to_owned()),
                 server: Some(c.irc_server.to_owned()),
-                channels: None,
-                port: Some(6697),
                 use_ssl: Some(true),
                 ..Default::default()
             };
