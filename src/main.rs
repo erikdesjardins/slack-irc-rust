@@ -186,7 +186,7 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
                     }
                 },
                 &slack::Message::MeMessage { ref channel, ref user, ref text, .. } if user == self.user_id => {
-                    self.tx.send(SlackToIrc::MeMessage { to: channel.clone(), msg: text.clone() }).unwrap();
+                    self.tx.send(SlackToIrc::MeMessage { to: format!("#{}", get_channel_with_id(&cli, channel).unwrap().name), msg: text.clone() }).unwrap();
                 },
                 _ => (),
             },
