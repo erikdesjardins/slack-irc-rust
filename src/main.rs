@@ -21,6 +21,7 @@ use std::io::prelude::*;
 use log::{LogRecord, LogMetadata, LogLevelFilter};
 use irc::client::prelude::{Command, Response, IrcServer, Server, ServerExt};
 use regex::Regex;
+use rustc_serialize::json::Json;
 
 struct StdoutLogger;
 
@@ -51,6 +52,7 @@ enum SlackToIrc {
     Away(bool),
     Join(String),
     Part(String),
+    Topic { chan: String, topic: String },
 }
 
 #[derive(Debug)]
@@ -179,7 +181,7 @@ fn parse_slack_text(text: &str, cli: &slack::RtmClient) -> String {
 }
 
 impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
-    fn on_event(&mut self, cli: &mut slack::RtmClient, event: Result<&slack::Event, slack::Error>, _raw_json: &str) {
+    fn on_event(&mut self, cli: &mut slack::RtmClient, event: Result<&slack::Event, slack::Error>, raw_json: &str) {
         match event {
             Ok(&slack::Event::Message(ref message)) => match message {
                 &slack::Message::Standard { channel: Some(ref channel), user: Some(ref user), text: Some(ref text), .. } if user == self.user_id => {
@@ -204,6 +206,11 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
                 },
                 &slack::Message::MeMessage { ref channel, ref user, ref text, .. } if user == self.user_id => {
                     self.tx.send(SlackToIrc::MeMessage { to: format!("#{}", get_channel_with_id(&cli, channel).unwrap().name), msg: text.clone() }).unwrap();
+                },
+                &slack::Message::ChannelTopic { ref user, ref topic, .. } if user == self.user_id => {
+                    if let Some(channel) = Json::from_str(raw_json).unwrap().find("channel").and_then(|j| j.as_string()) {
+                        self.tx.send(SlackToIrc::Topic { chan: format!("#{}", get_channel_with_id(&cli, channel).unwrap().name), topic: topic.clone() }).unwrap();
+                    }
                 },
                 _ => {
                     debug!("[SLACK] {:?}", event);
@@ -496,6 +503,9 @@ fn main() {
                     },
                     SlackToIrc::Part(chan) => {
                         server.send(Command::PART(chan, None)).unwrap();
+                    },
+                    SlackToIrc::Topic { chan, topic } => {
+                        server.send_topic(&chan, &topic).unwrap();
                     },
                 }
             }
