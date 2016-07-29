@@ -455,14 +455,19 @@ fn main() {
                             Command::MODE(name, modes, params) => {
                                 slack_tx.send(IrcToSlack::Mode { by: sender, name: name, modes: modes, params: params }).unwrap();
                             },
-                            Command::Response(resp, args, suffix) => match resp {
-                                Response::RPL_NOTOPIC | Response::RPL_TOPIC => {
-                                    // response to topic request
-                                    slack_tx.send(IrcToSlack::Topic { by: None, chan: args[1].clone(), topic: suffix }).unwrap();
-                                },
-                                _ => {
-                                    debug!("[IRC] {:?}", Command::Response(resp, args, suffix));
-                                },
+                            Command::Response(resp, args, suffix) => if resp.is_error() {
+                                // error responses
+                                slack_tx.send(IrcToSlack::Error(format!("{:?}: {} <{}>", resp, suffix.unwrap_or("".to_owned()), args.join(" ")))).unwrap();
+                            } else {
+                                match resp {
+                                    Response::RPL_NOTOPIC | Response::RPL_TOPIC => {
+                                        // response to topic request
+                                        slack_tx.send(IrcToSlack::Topic { by: None, chan: args[1].clone(), topic: suffix }).unwrap();
+                                    },
+                                    _ => {
+                                        debug!("[IRC] {:?}", Command::Response(resp, args, suffix));
+                                    },
+                                }
                             },
                             msg => {
                                 debug!("[IRC] {:?}", msg);
