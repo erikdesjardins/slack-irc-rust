@@ -38,6 +38,7 @@ impl log::Log for StdoutLogger {
 struct Config {
     irc_nick: String,
     irc_server: String,
+    irc_password: Option<String>,
     slack_user: String,
     slack_token: String,
 }
@@ -390,8 +391,9 @@ fn main() {
         let c = c.clone();
         thread::Builder::new().name("irc".to_owned()).spawn(move || {
             let config = irc::client::data::Config {
-                nickname: Some(c.irc_nick.to_owned()),
-                server: Some(c.irc_server.to_owned()),
+                nickname: Some(c.irc_nick.clone()),
+                server: Some(c.irc_server.clone()),
+                password: c.irc_password.clone(),
                 use_ssl: Some(true),
                 ..Default::default()
             };
