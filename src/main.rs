@@ -47,7 +47,7 @@ enum IrcToSlack {
 }
 
 struct SlackHandler<'a, T: 'a> {
-    chan: &'a Sender<T>,
+    tx: &'a Sender<T>,
     user_id: &'a str,
     bot_channel: &'a str,
 }
@@ -168,25 +168,25 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
                     let text = parse_slack_text(&text, cli);
 
                     if text.starts_with("%") {
-                        self.chan.send(SlackToIrc::Raw(text[1..].to_owned())).unwrap();
+                        self.tx.send(SlackToIrc::Raw(text[1..].to_owned())).unwrap();
                         cli.send_message(channel, "_sent raw command_").unwrap();
                     } else if channel == self.bot_channel {
                         if let Some(captures) = PM_RE.captures(&text) {
-                            self.chan.send(SlackToIrc::Message { to: captures.at(1).unwrap().to_owned(), msg: captures.at(2).unwrap().to_owned() }).unwrap();
+                            self.tx.send(SlackToIrc::Message { to: captures.at(1).unwrap().to_owned(), msg: captures.at(2).unwrap().to_owned() }).unwrap();
                         } else {
                             cli.send_message(channel, "_no message sent, are you missing a `user: ` prefix?_").unwrap();
                         }
                     } else {
-                        self.chan.send(SlackToIrc::Message { to: format!("#{}", get_channel_with_id(&cli, channel).unwrap().name), msg: text.clone() }).unwrap();
+                        self.tx.send(SlackToIrc::Message { to: format!("#{}", get_channel_with_id(&cli, channel).unwrap().name), msg: text.clone() }).unwrap();
                     }
                 },
                 &slack::Message::MeMessage { ref channel, ref user, ref text, .. } if user == self.user_id => {
-                    self.chan.send(SlackToIrc::MeMessage { to: channel.clone(), msg: text.clone() }).unwrap();
+                    self.tx.send(SlackToIrc::MeMessage { to: channel.clone(), msg: text.clone() }).unwrap();
                 },
                 _ => (),
             },
             Ok(&slack::Event::PresenceChange { ref user, ref presence }) if user == self.user_id => {
-                self.chan.send(SlackToIrc::Away(presence == "active")).unwrap();
+                self.tx.send(SlackToIrc::Away(presence == "active")).unwrap();
             },
             _ => (),
         }
@@ -255,7 +255,7 @@ fn main() {
 
                     let user_id = cli.get_user_id(&c.slack_user).unwrap().clone();
                     let mut handler = SlackHandler {
-                        chan: &irc_tx,
+                        tx: &irc_tx,
                         user_id: &user_id,
                         bot_channel: &cli.im_open(&user_id).unwrap().channel.id,
                     };
