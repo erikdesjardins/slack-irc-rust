@@ -326,6 +326,7 @@ fn main() {
                         post_message(&cli, &c.slack_token, to, &msg, from);
                     },
                     IrcToSlack::Topic { chan, topic } => {
+                        info!("{} - {:?}", chan, topic);
                         cli.set_topic(&chan, &topic.unwrap_or("".to_owned())).unwrap();
                     },
                     IrcToSlack::Kick { by, chans, nicks, reason } => {
@@ -396,6 +397,8 @@ fn main() {
                 thread::Builder::new().name("irc_server".to_owned()).spawn(move || {
                     for message in server.iter() {
                         let message = message.unwrap();
+                        // extract the nick from the `nick!nick@hostname.com`
+                        let sender = message.prefix.and_then(|prefix| prefix.split("!").nth(0).map(|s| s.to_owned()));
                         match message.command {
                             Command::ERROR(msg) => {
                                 slack_tx.send(IrcToSlack::Error(msg)).unwrap();
@@ -408,11 +411,11 @@ fn main() {
                                 if ACTION_RE.is_match(&text) {
                                     slack_tx.send(IrcToSlack::Message {
                                         to: to,
-                                        from: message.prefix,
+                                        from: sender,
                                         msg: format!("_{}_", ACTION_RE.captures(&text).unwrap().at(1).unwrap())
                                     }).unwrap();
                                 } else {
-                                    slack_tx.send(IrcToSlack::Message { to: to, from: message.prefix, msg: text }).unwrap();
+                                    slack_tx.send(IrcToSlack::Message { to: to, from: sender, msg: text }).unwrap();
                                 }
                             },
                             Command::TOPIC(channel, topic) => {
@@ -420,26 +423,26 @@ fn main() {
                             },
                             Command::KICK(channels, users, reason) => {
                                 slack_tx.send(IrcToSlack::Kick {
-                                    by: message.prefix,
+                                    by: sender,
                                     chans: channels.split(",").map(|s| s.to_owned()).collect(),
                                     nicks: users.split(",").map(|s| s.to_owned()).collect(),
                                     reason: reason
                                 }).unwrap();
                             },
                             Command::JOIN(channels, _, _) => {
-                                slack_tx.send(IrcToSlack::Join { nick: message.prefix.unwrap(), chans: channels.split(",").map(|s| s.to_owned()).collect() }).unwrap();
+                                slack_tx.send(IrcToSlack::Join { nick: sender.unwrap(), chans: channels.split(",").map(|s| s.to_owned()).collect() }).unwrap();
                             },
                             Command::PART(channels, reason) => {
-                                slack_tx.send(IrcToSlack::Part { nick: message.prefix.unwrap(), chans: channels.split(",").map(|s| s.to_owned()).collect(), reason: reason }).unwrap();
+                                slack_tx.send(IrcToSlack::Part { nick: sender.unwrap(), chans: channels.split(",").map(|s| s.to_owned()).collect(), reason: reason }).unwrap();
                             },
                             Command::QUIT(reason) => {
-                                slack_tx.send(IrcToSlack::Quit { nick: message.prefix.unwrap(), reason: reason }).unwrap();
+                                slack_tx.send(IrcToSlack::Quit { nick: sender.unwrap(), reason: reason }).unwrap();
                             },
                             Command::NICK(nick) => {
-                                slack_tx.send(IrcToSlack::Nick { old_nick: message.prefix.unwrap(), new_nick: nick }).unwrap();
+                                slack_tx.send(IrcToSlack::Nick { old_nick: sender.unwrap(), new_nick: nick }).unwrap();
                             },
                             Command::MODE(name, modes, params) => {
-                                slack_tx.send(IrcToSlack::Mode { by: message.prefix, name: name, modes: modes, params: params }).unwrap();
+                                slack_tx.send(IrcToSlack::Mode { by: sender, name: name, modes: modes, params: params }).unwrap();
                             }
                             _ => (),
                         }
