@@ -276,8 +276,8 @@ fn main() {
                     let (client, rx) = cli.login().unwrap();
 
                     // auto-join channels the bot has been invited to
-                    for chan in get_member_channels(&cli).map(|c| format!("#{}", c.name)) {
-                        irc_tx.send(SlackToIrc::Join(chan)).unwrap();
+                    for channel in get_member_channels(&cli) {
+                        irc_tx.send(SlackToIrc::Join(format!("#{}", channel.name))).unwrap();
                     }
 
                     let mut handler = SlackHandler {
