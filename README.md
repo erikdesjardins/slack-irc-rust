@@ -11,4 +11,4 @@ There must be a `config.toml` in the same directory as the executable, see `exam
 - Invite the bot to a Slack channel to join the IRC channel of the same name (and kick the bot to part)
 - Native slack `/me` messages work in IRC
 - Slack active/away status sent to IRC
-- Slack channel topic set to each IRC channel topic
+- Slack channel topic reflects IRC channel topic
