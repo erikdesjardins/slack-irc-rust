@@ -1,3 +1,4 @@
+#[macro_use] extern crate log;
 extern crate irc;
 extern crate hyper;
 extern crate slack;
@@ -15,8 +16,21 @@ use std::default::Default;
 use std::fs::File;
 use std::io::prelude::*;
 
+use log::{LogRecord, LogMetadata, LogLevelFilter};
 use irc::client::prelude::{Command, IrcServer, Server, ServerExt};
 use regex::Regex;
+
+struct StdoutLogger;
+
+impl log::Log for StdoutLogger {
+    fn enabled(&self, _: &LogMetadata) -> bool {
+        true
+    }
+
+    fn log(&self, record: &LogRecord) {
+        println!("[{}] {}", record.level(), record.args());
+    }
+}
 
 #[derive(Debug, RustcDecodable)]
 struct Config {
@@ -65,7 +79,7 @@ fn get_user_with_id(cli: &slack::RtmClient, id: &str) -> Option<slack::User> {
 
 fn log_err<T, E: Debug>(res: Result<T, E>) {
     if let Err(err) = res {
-        println!("[ERROR]: {:?}", err);
+        error!("{:?}", err);
     }
 }
 
@@ -206,7 +220,7 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
     fn on_ping(&mut self, _cli: &mut slack::RtmClient) {}
 
     fn on_close(&mut self, _cli: &mut slack::RtmClient) {
-        println!("[WARN] Disconnected from Slack");
+        warn!("Disconnected from Slack");
     }
 
     fn on_connect(&mut self, _cli: &mut slack::RtmClient) {}
@@ -217,7 +231,7 @@ fn post_message(cli: &slack::RtmClient, token: &str, to: &str, text: &str, usern
         match cli.get_channel_id(&to[1..]) {
             Some(id) => id,
             None => {
-                println!("[ERROR] Failed to find channel '{}'", &to[1..]);
+                error!("Failed to find channel '{}'", &to[1..]);
                 return;
             },
         }
@@ -250,6 +264,11 @@ fn get_member_channels(cli: &slack::RtmClient) -> Box<Iterator<Item = slack::Cha
 }
 
 fn main() {
+    log::set_logger(|max_log_level| {
+        max_log_level.set(LogLevelFilter::Info);
+        Box::new(StdoutLogger)
+    }).unwrap();
+
     let c: Arc<Config> = {
         let mut s: String = String::new();
         File::open(&"config.toml").and_then(|mut f| f.read_to_string(&mut s)).unwrap();
