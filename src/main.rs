@@ -206,12 +206,10 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
     fn on_ping(&mut self, _cli: &mut slack::RtmClient) {}
 
     fn on_close(&mut self, _cli: &mut slack::RtmClient) {
-        println!("Disconnected from Slack");
+        println!("[WARN] Disconnected from Slack");
     }
 
-    fn on_connect(&mut self, _cli: &mut slack::RtmClient) {
-        println!("Connected to Slack");
-    }
+    fn on_connect(&mut self, _cli: &mut slack::RtmClient) {}
 }
 
 fn post_message(cli: &slack::RtmClient, token: &str, to: &str, text: &str, username: Option<&str>) {
