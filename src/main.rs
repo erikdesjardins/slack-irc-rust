@@ -32,6 +32,7 @@ enum SlackToIrc {
     Raw(String),
     Away(bool),
     Join(String),
+    Part(String),
 }
 
 #[derive(Debug)]
@@ -188,6 +189,12 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
             },
             Ok(&slack::Event::PresenceChange { ref user, ref presence }) if user == self.user_id => {
                 self.tx.send(SlackToIrc::Away(presence == "active")).unwrap();
+            },
+            Ok(&slack::Event::ChannelJoined { ref channel }) => {
+                self.tx.send(SlackToIrc::Join(format!("#{}", channel.name))).unwrap();
+            },
+            Ok(&slack::Event::ChannelLeft { ref channel }) => {
+                self.tx.send(SlackToIrc::Part(format!("#{}", get_channel_with_id(&cli, channel).unwrap().name))).unwrap();
             },
             _ => (),
         }
@@ -424,6 +431,9 @@ fn main() {
                     },
                     SlackToIrc::Join(chan) => {
                         server.send_join(&chan).unwrap();
+                    },
+                    SlackToIrc::Part(chan) => {
+                        server.send(Command::PART(chan, None)).unwrap();
                     },
                 }
             }
