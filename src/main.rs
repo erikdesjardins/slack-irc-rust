@@ -56,15 +56,11 @@ struct SlackHandler<'a, T: 'a> {
 }
 
 fn get_channel_with_id(cli: &slack::RtmClient, id: &str) -> Option<slack::Channel> {
-    cli.get_channels().into_iter().find(|channel| {
-        channel.id == id
-    })
+    cli.get_channels().into_iter().find(|channel| channel.id == id)
 }
 
 fn get_user_with_id(cli: &slack::RtmClient, id: &str) -> Option<slack::User> {
-    cli.get_users().into_iter().find(|user| {
-        user.id == id
-    })
+    cli.get_users().into_iter().find(|user| user.id == id)
 }
 
 fn log_err<T, E: Debug>(res: Result<T, E>) {
