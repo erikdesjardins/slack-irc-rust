@@ -262,8 +262,15 @@ fn main() {
     let slack_thread = {
         let c = c.clone();
         thread::Builder::new().name("slack".to_owned()).spawn(move || {
+            let mut cli = slack::RtmClient::new(&c.slack_token);
+            cli.login().unwrap();
+
+            let user_id = cli.get_user_id(&c.slack_user).unwrap().clone();
+            let bot_channel = cli.im_open(&user_id).unwrap().channel.id;
+
             let recv_thread = {
                 let c = c.clone();
+                let bot_channel = bot_channel.clone();
                 thread::Builder::new().name("slack_recv".to_owned()).spawn(move || {
                     let mut cli = slack::RtmClient::new(&c.slack_token);
                     let (client, rx) = cli.login().unwrap();
@@ -273,21 +280,15 @@ fn main() {
                         irc_tx.send(SlackToIrc::Join(chan)).unwrap();
                     }
 
-                    let user_id = cli.get_user_id(&c.slack_user).unwrap().clone();
                     let mut handler = SlackHandler {
                         tx: &irc_tx,
                         user_id: &user_id,
-                        bot_channel: &cli.im_open(&user_id).unwrap().channel.id,
+                        bot_channel: &bot_channel,
                     };
 
                     cli.run(&mut handler, client, rx).unwrap();
                 }).unwrap()
             };
-
-            let mut cli = slack::RtmClient::new(&c.slack_token);
-            cli.login().unwrap();
-
-            let im_channel = &cli.im_open(&cli.get_user_id(&c.slack_user).unwrap()).unwrap().channel.id;
 
             for msg in slack_rx {
                 match msg {
@@ -298,7 +299,7 @@ fn main() {
                                 None => return,
                             }
                         } else {
-                            im_channel
+                            &bot_channel
                         };
 
                         let from = from.as_ref().map(|s| s.as_ref());
@@ -348,7 +349,7 @@ fn main() {
                         }
                     },
                     IrcToSlack::Error(msg) => {
-                        post_message(&cli, &c.slack_token, im_channel, &msg, None);
+                        post_message(&cli, &c.slack_token, &bot_channel, &msg, None);
                     },
                 }
             }
