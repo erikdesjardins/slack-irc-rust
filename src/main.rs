@@ -195,7 +195,7 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
                 _ => (),
             },
             Ok(&slack::Event::PresenceChange { ref user, ref presence }) if user == self.user_id => {
-                self.tx.send(SlackToIrc::Away(presence == "active")).unwrap();
+                self.tx.send(SlackToIrc::Away(presence != "active")).unwrap();
             },
             Ok(&slack::Event::ChannelJoined { ref channel }) => {
                 self.tx.send(SlackToIrc::Join(format!("#{}", channel.name))).unwrap();
