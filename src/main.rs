@@ -119,7 +119,7 @@ fn parse_slack_text(text: &str, cli: &slack::RtmClient) -> String {
             (Regex::new(r"<!(\w+)\|?(\w+)?>").unwrap(), Box::new(|captures: &regex::Captures, _| {
                 format!("<{}>", captures.at(2).or(captures.at(1)).unwrap_or("")).to_owned()
             })),
-            (Regex::new(r"\:(\w+)\:").unwrap(), Box::new(|captures: &regex::Captures, _| {
+            (Regex::new(r":(\w+):").unwrap(), Box::new(|captures: &regex::Captures, _| {
                 if let Some(&emoji) = EMOJIS.get(captures.at(1).unwrap()) {
                     emoji.to_owned()
                 } else {
