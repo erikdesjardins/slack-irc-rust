@@ -142,8 +142,8 @@ fn parse_slack_text(text: &str, cli: &slack::RtmClient) -> String {
 
 impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
     fn on_event(&mut self, cli: &mut slack::RtmClient, event: Result<&slack::Event, slack::Error>, _raw_json: &str) {
-        let slack_user = &"TEMP_REPLACE_ME";
-        let bot_channel = &"TEMP_REPLACE_ME";
+        let slack_user = cli.get_user_id(&"SLACK_USER_REPLACE_ME").unwrap();
+        let bot_channel = &cli.im_open(&slack_user).unwrap().channel.id;
         match event {
             Ok(&slack::Event::Message(ref message)) => match message {
                 &slack::Message::Standard { channel: Some(ref channel), user: Some(ref user), text: Some(ref text), .. } if user == slack_user => {
@@ -233,15 +233,19 @@ fn main() {
         cli.login().unwrap();
 
         let all_channels = ["ALL_CHANNELS_REPLACE_ME"];
-        let dm_channel = "SLACK_DM_CHANNEL_TODO_REPLACE_ME";
+        let im_channel = &cli.im_open(&cli.get_user_id(&"SLACK_USER_REPLACE_ME").unwrap()).unwrap().channel.id;
 
         for msg in slack_rx {
             match msg {
                 IrcToSlack::Message { to, from, msg } => {
                     let to: &str = if to.starts_with("#") {
-                        dm_channel
+                        if !all_channels.iter().any(|&chan| chan == to) {
+                            return;
+                        } else {
+                            &to
+                        }
                     } else {
-                        &to
+                        im_channel
                     };
 
                     let from = from.as_ref().map(|s| s.as_ref());
