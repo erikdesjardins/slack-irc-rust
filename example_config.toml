@@ -1,0 +1,4 @@
+irc_nick = "irc nickname"
+irc_server = "irc.example.org"
+slack_user = "your slack username (not the bot's)"
+slack_token = "my slack token"
