@@ -204,7 +204,9 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
                 &slack::Message::MeMessage { ref channel, ref user, ref text, .. } if user == self.user_id => {
                     self.tx.send(SlackToIrc::MeMessage { to: format!("#{}", get_channel_with_id(&cli, channel).unwrap().name), msg: text.clone() }).unwrap();
                 },
-                _ => (),
+                _ => {
+                    debug!("{:?}", event);
+                },
             },
             Ok(&slack::Event::PresenceChange { ref user, ref presence }) if user == self.user_id => {
                 self.tx.send(SlackToIrc::Away(presence != "active")).unwrap();
@@ -215,7 +217,9 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
             Ok(&slack::Event::ChannelLeft { ref channel }) => {
                 self.tx.send(SlackToIrc::Part(format!("#{}", get_channel_with_id(&cli, channel).unwrap().name))).unwrap();
             },
-            _ => (),
+            evt => {
+                debug!("{:?}", evt);
+            },
         }
     }
 
