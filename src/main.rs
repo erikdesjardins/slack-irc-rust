@@ -31,6 +31,7 @@ enum SlackToIrc {
     MeMessage { to: String, msg: String },
     Raw(String),
     Away(bool),
+    Join(String),
 }
 
 #[derive(Debug)]
@@ -253,6 +254,11 @@ fn main() {
                     let mut cli = slack::RtmClient::new(&c.slack_token);
                     let (client, rx) = cli.login().unwrap();
 
+                    // auto-join channels the bot has been invited to
+                    for chan in get_member_channels(&cli).map(|c| format!("#{}", c.name)) {
+                        irc_tx.send(SlackToIrc::Join(chan)).unwrap();
+                    }
+
                     let user_id = cli.get_user_id(&c.slack_user).unwrap().clone();
                     let mut handler = SlackHandler {
                         tx: &irc_tx,
@@ -415,6 +421,9 @@ fn main() {
                     },
                     SlackToIrc::Away(is_away) => {
                         server.send(Command::AWAY(Some(if is_away { " ".to_owned() } else { "".to_owned() }))).unwrap();
+                    },
+                    SlackToIrc::Join(chan) => {
+                        server.send_join(&chan).unwrap();
                     },
                 }
             }
