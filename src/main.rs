@@ -113,7 +113,7 @@ fn parse_slack_text(text: &str, cli: &slack::RtmClient) -> String {
                 }
                 captures.at(2).unwrap_or("").to_owned()
             })),
-            (Regex::new(r"<(?!!)(\S+)>").unwrap(), Box::new(|captures: &regex::Captures, _| {
+            (Regex::new(r"<([^!]\S+)>").unwrap(), Box::new(|captures: &regex::Captures, _| {
                 captures.at(1).unwrap_or("").to_owned()
             })),
             (Regex::new(r"<!(\w+)\|?(\w+)?>").unwrap(), Box::new(|captures: &regex::Captures, _| {
