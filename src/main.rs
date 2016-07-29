@@ -36,14 +36,14 @@ struct SlackHandler<'a, T: 'a> {
     chan: &'a Sender<T>,
 }
 
-fn get_channel_with_id(id: &str, channels: Vec<slack::Channel>) -> Option<slack::Channel> {
-    channels.into_iter().find(|channel| {
+fn get_channel_with_id(cli: &slack::RtmClient, id: &str) -> Option<slack::Channel> {
+    cli.get_channels().into_iter().find(|channel| {
         channel.id == id
     })
 }
 
-fn get_user_with_id(id: &str, users: Vec<slack::User>) -> Option<slack::User> {
-    users.into_iter().find(|user| {
+fn get_user_with_id(cli: &slack::RtmClient, id: &str) -> Option<slack::User> {
+    cli.get_users().into_iter().find(|user| {
         user.id == id
     })
 }
@@ -99,7 +99,7 @@ fn parse_slack_text(text: &str, cli: &slack::RtmClient) -> String {
         static ref FUNCTIONS: Vec<(Regex, Box<Fn(&regex::Captures, &slack::RtmClient) -> String + Sync>)> = vec![
             (Regex::new(r"<#(C\w+)\|?(\w+)?>").unwrap(), Box::new(|captures: &regex::Captures, cli: &slack::RtmClient| {
                 if let Some(id) = captures.at(1) {
-                    if let Some(channel) = get_channel_with_id(id, cli.get_channels()) {
+                    if let Some(channel) = get_channel_with_id(cli, id) {
                         return format!("#{}", channel.name).to_owned()
                     }
                 }
@@ -107,7 +107,7 @@ fn parse_slack_text(text: &str, cli: &slack::RtmClient) -> String {
             })),
             (Regex::new(r"<@(U\w+)\|?(\w+)?>").unwrap(), Box::new(|captures: &regex::Captures, cli: &slack::RtmClient| {
                 if let Some(id) = captures.at(1) {
-                    if let Some(user) = get_user_with_id(id, cli.get_users()) {
+                    if let Some(user) = get_user_with_id(cli, id) {
                         return format!("@{}", user.name).to_owned()
                     }
                 }
@@ -163,7 +163,7 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
                             cli.send_message(channel, "_no message sent, are you missing a `user: ` prefix?_").unwrap();
                         }
                     } else {
-                        self.chan.send(SlackToIrc::Message { to: channel.clone(), msg: text.clone() }).unwrap();
+                        self.chan.send(SlackToIrc::Message { to: format!("#{}", get_channel_with_id(&cli, channel).unwrap().name), msg: text.clone() }).unwrap();
                     }
                 },
                 &slack::Message::MeMessage { ref channel, ref user, ref text, .. } if user == slack_user => {
