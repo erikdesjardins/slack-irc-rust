@@ -3,13 +3,27 @@ extern crate hyper;
 extern crate slack;
 #[macro_use] extern crate lazy_static;
 extern crate regex;
+extern crate toml;
+extern crate rustc_serialize;
 
 use std::collections::HashMap;
 use std::thread;
+use std::sync::Arc;
 use std::sync::mpsc::{Sender, channel};
 use std::default::Default;
-use irc::client::prelude::*;
+use std::fs::File;
+use std::io::prelude::*;
+
+use irc::client::prelude::{Command, IrcServer, Server, ServerExt};
 use regex::Regex;
+
+#[derive(Debug, RustcDecodable)]
+struct Config {
+    irc_nick: String,
+    irc_server: String,
+    slack_user: String,
+    slack_token: String,
+}
 
 #[derive(Debug)]
 enum SlackToIrc {
@@ -34,6 +48,8 @@ enum IrcToSlack {
 
 struct SlackHandler<'a, T: 'a> {
     chan: &'a Sender<T>,
+    user_id: &'a str,
+    bot_channel: &'a str,
 }
 
 fn get_channel_with_id(cli: &slack::RtmClient, id: &str) -> Option<slack::Channel> {
@@ -142,11 +158,9 @@ fn parse_slack_text(text: &str, cli: &slack::RtmClient) -> String {
 
 impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
     fn on_event(&mut self, cli: &mut slack::RtmClient, event: Result<&slack::Event, slack::Error>, _raw_json: &str) {
-        let slack_user = cli.get_user_id(&"SLACK_USER_REPLACE_ME").unwrap();
-        let bot_channel = &cli.im_open(&slack_user).unwrap().channel.id;
         match event {
             Ok(&slack::Event::Message(ref message)) => match message {
-                &slack::Message::Standard { channel: Some(ref channel), user: Some(ref user), text: Some(ref text), .. } if user == slack_user => {
+                &slack::Message::Standard { channel: Some(ref channel), user: Some(ref user), text: Some(ref text), .. } if user == self.user_id => {
                     lazy_static!{
                         static ref PM_RE: Regex = Regex::new(r"^(\S+):\s+(.+)").unwrap();
                     }
@@ -156,7 +170,7 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
                     if text.starts_with("%") {
                         self.chan.send(SlackToIrc::Raw(text[1..].to_owned())).unwrap();
                         cli.send_message(channel, "_sent raw command_").unwrap();
-                    } else if channel == bot_channel {
+                    } else if channel == self.bot_channel {
                         if let Some(captures) = PM_RE.captures(&text) {
                             self.chan.send(SlackToIrc::Message { to: captures.at(1).unwrap().to_owned(), msg: captures.at(2).unwrap().to_owned() }).unwrap();
                         } else {
@@ -166,12 +180,12 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
                         self.chan.send(SlackToIrc::Message { to: format!("#{}", get_channel_with_id(&cli, channel).unwrap().name), msg: text.clone() }).unwrap();
                     }
                 },
-                &slack::Message::MeMessage { ref channel, ref user, ref text, .. } if user == slack_user => {
+                &slack::Message::MeMessage { ref channel, ref user, ref text, .. } if user == self.user_id => {
                     self.chan.send(SlackToIrc::MeMessage { to: channel.clone(), msg: text.clone() }).unwrap();
                 },
                 _ => (),
             },
-            Ok(&slack::Event::PresenceChange { ref user, ref presence }) if user == slack_user => {
+            Ok(&slack::Event::PresenceChange { ref user, ref presence }) if user == self.user_id => {
                 self.chan.send(SlackToIrc::Away(presence == "active")).unwrap();
             },
             _ => (),
@@ -216,177 +230,200 @@ fn post_message(cli: &slack::RtmClient, token: &str, to: &str, text: &str, usern
     ).map_err(|e| e.into())
 }
 
+fn get_member_channels(cli: &slack::RtmClient) -> Box<Iterator<Item = slack::Channel>> {
+    Box::new(cli.get_channels().into_iter().filter(|c| c.is_member))
+}
+
 fn main() {
+    let c: Arc<Config> = {
+        let mut s: String = String::new();
+        File::open(&"config.toml").and_then(|mut f| f.read_to_string(&mut s)).unwrap();
+        toml::decode_str::<Config>(&s).unwrap().into()
+    };
+
     let (slack_tx, slack_rx) = channel();
     let (irc_tx, irc_rx) = channel();
 
-    let slack_thread = thread::Builder::new().name("slack".to_owned()).spawn(move || {
-        let slack_token = "SLACK_TOKEN_REPLACE_ME";
+    let slack_thread = {
+        let c = c.clone();
+        thread::Builder::new().name("slack".to_owned()).spawn(move || {
+            let recv_thread = {
+                let c = c.clone();
+                thread::Builder::new().name("slack_recv".to_owned()).spawn(move || {
+                    let mut cli = slack::RtmClient::new(&c.slack_token);
+                    let (client, rx) = cli.login().unwrap();
 
-        let recv_thread = thread::Builder::new().name("slack_recv".to_owned()).spawn(move || {
-            let mut handler = SlackHandler { chan: &irc_tx };
-            let mut cli = slack::RtmClient::new(&slack_token);
-            cli.login_and_run(&mut handler).unwrap();
-        }).unwrap();
-
-        let mut cli = slack::RtmClient::new(&slack_token);
-        cli.login().unwrap();
-
-        let all_channels = ["ALL_CHANNELS_REPLACE_ME"];
-        let im_channel = &cli.im_open(&cli.get_user_id(&"SLACK_USER_REPLACE_ME").unwrap()).unwrap().channel.id;
-
-        for msg in slack_rx {
-            match msg {
-                IrcToSlack::Message { to, from, msg } => {
-                    let to: &str = if to.starts_with("#") {
-                        if !all_channels.iter().any(|&chan| chan == to) {
-                            return;
-                        } else {
-                            &to
-                        }
-                    } else {
-                        im_channel
+                    let user_id = cli.get_user_id(&c.slack_user).unwrap().clone();
+                    let mut handler = SlackHandler {
+                        chan: &irc_tx,
+                        user_id: &user_id,
+                        bot_channel: &cli.im_open(&user_id).unwrap().channel.id,
                     };
 
-                    let from = from.as_ref().map(|s| s.as_ref());
+                    cli.run(&mut handler, client, rx).unwrap();
+                }).unwrap()
+            };
 
-                    post_message(&cli, &slack_token, to, &msg, from).unwrap();
-                },
-                IrcToSlack::Topic { chan, topic } => {
-                    cli.set_topic(&chan, &topic.unwrap_or("".to_owned())).unwrap();
-                },
-                IrcToSlack::Kick { by, chans, nicks, reason } => {
-                    let by = &by.unwrap_or("server".to_owned());
-                    let reason = &reason.unwrap_or("".to_owned());
+            let mut cli = slack::RtmClient::new(&c.slack_token);
+            cli.login().unwrap();
 
-                    for chan in chans.split(",") {
-                        for nick in nicks.split(",") {
-                            post_message(&cli, &slack_token, &chan, &format!("*{}* has kicked *{}* (_{}_)", by, nick, reason), None).unwrap();
+            let im_channel = &cli.im_open(&cli.get_user_id(&c.slack_user).unwrap()).unwrap().channel.id;
+
+            for msg in slack_rx {
+                match msg {
+                    IrcToSlack::Message { to, from, msg } => {
+                        let to: &str = if to.starts_with("#") {
+                            match cli.get_channel_id(&to[1..]) {
+                                Some(ref id) => id,
+                                None => return,
+                            }
+                        } else {
+                            im_channel
+                        };
+
+                        let from = from.as_ref().map(|s| s.as_ref());
+
+                        post_message(&cli, &c.slack_token, to, &msg, from).unwrap();
+                    },
+                    IrcToSlack::Topic { chan, topic } => {
+                        cli.set_topic(&chan, &topic.unwrap_or("".to_owned())).unwrap();
+                    },
+                    IrcToSlack::Kick { by, chans, nicks, reason } => {
+                        let by = &by.unwrap_or("server".to_owned());
+                        let reason = &reason.unwrap_or("".to_owned());
+
+                        for chan in chans.split(",") {
+                            for nick in nicks.split(",") {
+                                post_message(&cli, &c.slack_token, &chan, &format!("*{}* has kicked *{}* (_{}_)", by, nick, reason), None).unwrap();
+                            }
                         }
-                    }
-                },
-                IrcToSlack::Join { nick, chans } => {
-                    for chan in chans.split(",") {
-                        post_message(&cli, &slack_token, &chan, &format!("*{}* has joined", nick), None).unwrap();
-                    }
-                },
-                IrcToSlack::Part { nick, chans, reason } => {
-                    let reason = &reason.unwrap_or("".to_owned());
+                    },
+                    IrcToSlack::Join { nick, chans } => {
+                        for chan in chans.split(",") {
+                            post_message(&cli, &c.slack_token, &chan, &format!("*{}* has joined", nick), None).unwrap();
+                        }
+                    },
+                    IrcToSlack::Part { nick, chans, reason } => {
+                        let reason = &reason.unwrap_or("".to_owned());
 
-                    for chan in chans.split(",") {
-                        post_message(&cli, &slack_token, &chan, &format!("*{}* has left (_{}_)", nick, reason), None).unwrap();
-                    }
-                },
-                IrcToSlack::Quit { nick, reason } => {
-                    let reason = &reason.unwrap_or("".to_owned());
+                        for chan in chans.split(",") {
+                            post_message(&cli, &c.slack_token, &chan, &format!("*{}* has left (_{}_)", nick, reason), None).unwrap();
+                        }
+                    },
+                    IrcToSlack::Quit { nick, reason } => {
+                        let reason = &reason.unwrap_or("".to_owned());
 
-                    for chan in &all_channels {
-                        post_message(&cli, &slack_token, &chan, &format!("*{}* has quit (_{}_)", nick, reason), None).unwrap();
-                    }
-                },
-                IrcToSlack::Nick { old_nick, new_nick } => {
-                    for chan in &all_channels {
-                        post_message(&cli, &slack_token, &chan, &format!("*{}* is now known as *{}*", old_nick, new_nick), None).unwrap();
-                    }
-                },
-                IrcToSlack::Mode { by, name, modes, params } => {
-                    if name.starts_with("#") {
-                        post_message(&cli, &slack_token, &name, &format!("*{}* sets mode *{}* on _{}_", by.unwrap_or("server".to_owned()), modes, params.unwrap_or(name.clone())), None).unwrap();
-                    }
-                },
-                IrcToSlack::Error(msg) => {
-                    post_message(&cli, &slack_token, im_channel, &msg, None).unwrap();
-                },
+                        for chan_id in get_member_channels(&cli).map(|c| c.id) {
+                            post_message(&cli, &c.slack_token, &chan_id, &format!("*{}* has quit (_{}_)", nick, reason), None).unwrap();
+                        }
+                    },
+                    IrcToSlack::Nick { old_nick, new_nick } => {
+                        for chan_id in get_member_channels(&cli).map(|c| c.id) {
+                            post_message(&cli, &c.slack_token, &chan_id, &format!("*{}* is now known as *{}*", old_nick, new_nick), None).unwrap();
+                        }
+                    },
+                    IrcToSlack::Mode { by, name, modes, params } => {
+                        if name.starts_with("#") {
+                            post_message(&cli, &c.slack_token, &name, &format!("*{}* sets mode *{}* on _{}_", by.unwrap_or("server".to_owned()), modes, params.unwrap_or(name.clone())), None).unwrap();
+                        }
+                    },
+                    IrcToSlack::Error(msg) => {
+                        post_message(&cli, &c.slack_token, im_channel, &msg, None).unwrap();
+                    },
+                }
             }
-        }
 
-        recv_thread.join().unwrap();
-    }).unwrap();
+            recv_thread.join().unwrap();
+        }).unwrap()
+    };
 
-    let irc_thread = thread::Builder::new().name("irc".to_owned()).spawn(move || {
-        let config = Config {
-            nickname: Some("NICK_REPLACE_ME".to_owned()),
-            server: Some("SERVER_REPLACE_ME".to_owned()),
-            channels: Some(vec!["CHANNELS_REPLACE_ME".to_owned()]),
-            port: Some(6697),
-            use_ssl: Some(true),
-            ..Default::default()
-        };
+    let irc_thread = {
+        let c = c.clone();
+        thread::Builder::new().name("irc".to_owned()).spawn(move || {
+            let config = irc::client::data::Config {
+                nickname: Some(c.irc_nick.to_owned()),
+                server: Some(c.irc_server.to_owned()),
+                channels: None,
+                port: Some(6697),
+                use_ssl: Some(true),
+                ..Default::default()
+            };
 
-        let server = IrcServer::from_config(config).unwrap();
+            let server = IrcServer::from_config(config).unwrap();
 
-        server.identify().unwrap();
+            server.identify().unwrap();
 
-        let server_thread = {
-            let server = server.clone();
-            thread::Builder::new().name("irc_server".to_owned()).spawn(move || {
-                for message in server.iter() {
-                    let message = message.unwrap();
-                    match message.command {
-                        Command::ERROR(msg) => {
-                            slack_tx.send(IrcToSlack::Error(msg)).unwrap();
-                        },
-                        Command::PRIVMSG(to, text) | Command::NOTICE(to, text) => {
-                            lazy_static!{
+            let server_thread = {
+                let server = server.clone();
+                thread::Builder::new().name("irc_server".to_owned()).spawn(move || {
+                    for message in server.iter() {
+                        let message = message.unwrap();
+                        match message.command {
+                            Command::ERROR(msg) => {
+                                slack_tx.send(IrcToSlack::Error(msg)).unwrap();
+                            },
+                            Command::PRIVMSG(to, text) | Command::NOTICE(to, text) => {
+                                lazy_static!{
                                 static ref ACTION_RE: Regex = Regex::new("^\x01ACTION (.+)\x01$").unwrap();
                             }
 
-                            if ACTION_RE.is_match(&text) {
-                                slack_tx.send(IrcToSlack::Message {
-                                    to: to,
-                                    from: message.prefix,
-                                    msg: format!("_{}_", ACTION_RE.captures(&text).unwrap().at(1).unwrap())
-                                }).unwrap();
-                            } else {
-                                slack_tx.send(IrcToSlack::Message { to: to, from: message.prefix, msg: text }).unwrap();
+                                if ACTION_RE.is_match(&text) {
+                                    slack_tx.send(IrcToSlack::Message {
+                                        to: to,
+                                        from: message.prefix,
+                                        msg: format!("_{}_", ACTION_RE.captures(&text).unwrap().at(1).unwrap())
+                                    }).unwrap();
+                                } else {
+                                    slack_tx.send(IrcToSlack::Message { to: to, from: message.prefix, msg: text }).unwrap();
+                                }
+                            },
+                            Command::TOPIC(channel, topic) => {
+                                slack_tx.send(IrcToSlack::Topic { chan: channel, topic: topic }).unwrap();
+                            },
+                            Command::KICK(channels, users, reason) => {
+                                slack_tx.send(IrcToSlack::Kick { by: message.prefix, chans: channels, nicks: users, reason: reason }).unwrap();
+                            },
+                            Command::JOIN(channels, _, _) => {
+                                slack_tx.send(IrcToSlack::Join { nick: message.prefix.unwrap(), chans: channels }).unwrap();
+                            },
+                            Command::PART(channels, reason) => {
+                                slack_tx.send(IrcToSlack::Part { nick: message.prefix.unwrap(), chans: channels, reason: reason }).unwrap();
+                            },
+                            Command::QUIT(reason) => {
+                                slack_tx.send(IrcToSlack::Quit { nick: message.prefix.unwrap(), reason: reason }).unwrap();
+                            },
+                            Command::NICK(nick) => {
+                                slack_tx.send(IrcToSlack::Nick { old_nick: message.prefix.unwrap(), new_nick: nick }).unwrap();
+                            },
+                            Command::MODE(name, modes, params) => {
+                                slack_tx.send(IrcToSlack::Mode { by: message.prefix, name: name, modes: modes, params: params }).unwrap();
                             }
-                        },
-                        Command::TOPIC(channel, topic) => {
-                            slack_tx.send(IrcToSlack::Topic { chan: channel, topic: topic }).unwrap();
-                        },
-                        Command::KICK(channels, users, reason) => {
-                            slack_tx.send(IrcToSlack::Kick { by: message.prefix, chans: channels, nicks: users, reason: reason }).unwrap();
-                        },
-                        Command::JOIN(channels, _, _) => {
-                            slack_tx.send(IrcToSlack::Join { nick: message.prefix.unwrap(), chans: channels }).unwrap();
-                        },
-                        Command::PART(channels, reason) => {
-                            slack_tx.send(IrcToSlack::Part { nick: message.prefix.unwrap(), chans: channels, reason: reason }).unwrap();
-                        },
-                        Command::QUIT(reason) => {
-                            slack_tx.send(IrcToSlack::Quit { nick: message.prefix.unwrap(), reason: reason }).unwrap();
-                        },
-                        Command::NICK(nick) => {
-                            slack_tx.send(IrcToSlack::Nick { old_nick: message.prefix.unwrap(), new_nick: nick }).unwrap();
-                        },
-                        Command::MODE(name, modes, params) => {
-                            slack_tx.send(IrcToSlack::Mode { by: message.prefix, name: name, modes: modes, params: params }).unwrap();
+                            _ => (),
                         }
-                        _ => (),
                     }
+                }).unwrap()
+            };
+
+            for msg in irc_rx {
+                match msg {
+                    SlackToIrc::Message { to, msg } => {
+                        server.send_privmsg(&to, &msg).unwrap();
+                    },
+                    SlackToIrc::MeMessage { to, msg } => {
+                        server.send_privmsg(&to, &format!("\x01ACTION {}\x01", msg)).unwrap();
+                    },
+                    SlackToIrc::Raw(msg) => {
+                        server.send(Command::Raw(msg, vec![], None)).unwrap();
+                    },
+                    SlackToIrc::Away(is_away) => {
+                        server.send(Command::AWAY(Some(if is_away { " ".to_owned() } else { "".to_owned() }))).unwrap();
+                    },
                 }
-            }).unwrap()
-        };
-
-        for msg in irc_rx {
-            match msg {
-                SlackToIrc::Message { to, msg } => {
-                    server.send_privmsg(&to, &msg).unwrap();
-                },
-                SlackToIrc::MeMessage { to, msg } => {
-                    server.send_privmsg(&to, &format!("\x01ACTION {}\x01", msg)).unwrap();
-                },
-                SlackToIrc::Raw(msg) => {
-                    server.send(Command::Raw(msg, vec![], None)).unwrap();
-                },
-                SlackToIrc::Away(is_away) => {
-                    server.send(Command::AWAY(Some(if is_away { " ".to_owned() } else { "".to_owned() }))).unwrap();
-                },
             }
-        }
 
-        server_thread.join().unwrap();
-    }).unwrap();
+            server_thread.join().unwrap();
+        }).unwrap()
+    };
 
     slack_thread.join().unwrap();
     irc_thread.join().unwrap();
