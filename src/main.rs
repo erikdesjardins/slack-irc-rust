@@ -345,7 +345,7 @@ fn main() {
                         if let Some(by) = by {
                             post_message(&cli, &c.slack_token, &chan, &format!("*{}* has changed the topic", by), None);
                         }
-                        cli.set_topic(&chan, &topic.unwrap_or("".to_owned()).chars().take(250).collect::<String>()).unwrap();
+                        log_err(cli.set_topic(&chan, &topic.unwrap_or("".to_owned()).chars().take(250).collect::<String>()));
                     },
                     IrcToSlack::Kick { by, chans, nicks, reason } => {
                         let by = &by.unwrap_or("server".to_owned());
