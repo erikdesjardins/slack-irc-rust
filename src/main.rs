@@ -201,17 +201,17 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
                             log_err(cli.send_message(channel, "_no message sent, are you missing a `user: ` prefix?_"));
                         }
                     } else {
-                        self.tx.send(SlackToIrc::Message { to: format!("#{}", get_channel_with_id(&cli, channel).unwrap().name), msg: text.clone() }).unwrap();
+                        self.tx.send(SlackToIrc::Message { to: format!("#{}", get_channel_with_id(cli, channel).unwrap().name), msg: text.clone() }).unwrap();
                     }
                 },
                 &slack::Message::MeMessage { ref channel, ref user, ref text, .. } if user == self.user_id => {
                     let text = parse_slack_text(&text, cli);
 
-                    self.tx.send(SlackToIrc::MeMessage { to: format!("#{}", get_channel_with_id(&cli, channel).unwrap().name), msg: text.clone() }).unwrap();
+                    self.tx.send(SlackToIrc::MeMessage { to: format!("#{}", get_channel_with_id(cli, channel).unwrap().name), msg: text.clone() }).unwrap();
                 },
                 &slack::Message::ChannelTopic { ref user, ref topic, .. } if user == self.user_id => {
                     if let Some(channel) = Json::from_str(raw_json).unwrap().find("channel").and_then(|j| j.as_string()) {
-                        self.tx.send(SlackToIrc::Topic { chan: format!("#{}", get_channel_with_id(&cli, channel).unwrap().name), topic: topic.clone() }).unwrap();
+                        self.tx.send(SlackToIrc::Topic { chan: format!("#{}", get_channel_with_id(cli, channel).unwrap().name), topic: topic.clone() }).unwrap();
                     }
                 },
                 _ => {
@@ -225,7 +225,7 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
                 self.tx.send(SlackToIrc::Join(format!("#{}", channel.name))).unwrap();
             },
             Ok(&slack::Event::ChannelLeft { ref channel }) => {
-                self.tx.send(SlackToIrc::Part(format!("#{}", get_channel_with_id(&cli, channel).unwrap().name))).unwrap();
+                self.tx.send(SlackToIrc::Part(format!("#{}", get_channel_with_id(cli, channel).unwrap().name))).unwrap();
             },
             evt => {
                 debug!("[SLACK] {:?}", evt);
