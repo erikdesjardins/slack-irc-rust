@@ -66,10 +66,12 @@ enum IrcToSlack {
     Nick { old_nick: String, new_nick: String },
     Mode { by: Option<String>, name: String, modes: String, params: Option<String> },
     Error(String),
+    UpdateChannels,
 }
 
-struct SlackHandler<'a, T: 'a> {
-    tx: &'a Sender<T>,
+struct SlackHandler<'a> {
+    irc_tx: &'a Sender<SlackToIrc>,
+    slack_tx: &'a Sender<IrcToSlack>,
     user_id: &'a str,
     bot_channel: &'a str,
 }
@@ -180,7 +182,7 @@ fn parse_slack_text(text: &str, cli: &slack::RtmClient) -> String {
     })
 }
 
-impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
+impl<'a> slack::EventHandler for SlackHandler<'a> {
     fn on_event(&mut self, cli: &mut slack::RtmClient, event: Result<&slack::Event, slack::Error>, raw_json: &str) {
         match event {
             Ok(&slack::Event::Message(ref message)) => match message {
@@ -192,26 +194,26 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
                     let text = parse_slack_text(&text, cli);
 
                     if text.starts_with("%") {
-                        self.tx.send(SlackToIrc::Raw(text[1..].to_owned())).unwrap();
+                        self.irc_tx.send(SlackToIrc::Raw(text[1..].to_owned())).unwrap();
                         log_err(cli.send_message(channel, "_sent raw command_"));
                     } else if channel == self.bot_channel {
                         if let Some(captures) = PM_RE.captures(&text) {
-                            self.tx.send(SlackToIrc::Message { to: captures.at(1).unwrap().to_owned(), msg: captures.at(2).unwrap().to_owned() }).unwrap();
+                            self.irc_tx.send(SlackToIrc::Message { to: captures.at(1).unwrap().to_owned(), msg: captures.at(2).unwrap().to_owned() }).unwrap();
                         } else {
                             log_err(cli.send_message(channel, "_no message sent, are you missing a `user: ` prefix?_"));
                         }
                     } else {
-                        self.tx.send(SlackToIrc::Message { to: format!("#{}", get_channel_with_id(cli, channel).unwrap().name), msg: text.clone() }).unwrap();
+                        self.irc_tx.send(SlackToIrc::Message { to: format!("#{}", get_channel_with_id(cli, channel).unwrap().name), msg: text.clone() }).unwrap();
                     }
                 },
                 &slack::Message::MeMessage { ref channel, ref user, ref text, .. } if user == self.user_id => {
                     let text = parse_slack_text(&text, cli);
 
-                    self.tx.send(SlackToIrc::MeMessage { to: format!("#{}", get_channel_with_id(cli, channel).unwrap().name), msg: text.clone() }).unwrap();
+                    self.irc_tx.send(SlackToIrc::MeMessage { to: format!("#{}", get_channel_with_id(cli, channel).unwrap().name), msg: text.clone() }).unwrap();
                 },
                 &slack::Message::ChannelTopic { ref user, ref topic, .. } if user == self.user_id => {
                     if let Some(channel) = Json::from_str(raw_json).unwrap().find("channel").and_then(|j| j.as_string()) {
-                        self.tx.send(SlackToIrc::Topic { chan: format!("#{}", get_channel_with_id(cli, channel).unwrap().name), topic: topic.clone() }).unwrap();
+                        self.irc_tx.send(SlackToIrc::Topic { chan: format!("#{}", get_channel_with_id(cli, channel).unwrap().name), topic: topic.clone() }).unwrap();
                     }
                 },
                 _ => {
@@ -219,13 +221,19 @@ impl<'a> slack::EventHandler for SlackHandler<'a, SlackToIrc> {
                 },
             },
             Ok(&slack::Event::PresenceChange { ref user, ref presence }) if user == self.user_id => {
-                self.tx.send(SlackToIrc::Away(presence != "active")).unwrap();
+                self.irc_tx.send(SlackToIrc::Away(presence != "active")).unwrap();
             },
             Ok(&slack::Event::ChannelJoined { ref channel }) => {
-                self.tx.send(SlackToIrc::Join(format!("#{}", channel.name))).unwrap();
+                if cli.get_channels().into_iter().find(|c| c.id == channel.id).is_none() {
+                    // we haven't seen this channel before, so update channels
+                    cli.update_channels().unwrap();
+                    // also update the other `cli` instance
+                    self.slack_tx.send(IrcToSlack::UpdateChannels).unwrap();
+                }
+                self.irc_tx.send(SlackToIrc::Join(format!("#{}", channel.name))).unwrap();
             },
             Ok(&slack::Event::ChannelLeft { ref channel }) => {
-                self.tx.send(SlackToIrc::Part(format!("#{}", get_channel_with_id(cli, channel).unwrap().name))).unwrap();
+                self.irc_tx.send(SlackToIrc::Part(format!("#{}", get_channel_with_id(cli, channel).unwrap().name))).unwrap();
             },
             evt => {
                 debug!("[SLACK] {:?}", evt);
@@ -291,11 +299,12 @@ fn main() {
         toml::decode_str::<Config>(&s).unwrap().into()
     };
 
-    let (slack_tx, slack_rx) = channel();
-    let (irc_tx, irc_rx) = channel();
+    let (slack_tx, slack_rx) = channel::<IrcToSlack>();
+    let (irc_tx, irc_rx) = channel::<SlackToIrc>();
 
     let slack_thread = {
         let c = c.clone();
+        let slack_tx = slack_tx.clone();
         thread::Builder::new().name("slack".to_owned()).spawn(move || {
             let mut cli = slack::RtmClient::new(&c.slack_token);
             cli.login().unwrap();
@@ -316,7 +325,8 @@ fn main() {
                     }
 
                     let mut handler = SlackHandler {
-                        tx: &irc_tx,
+                        irc_tx: &irc_tx,
+                        slack_tx: &slack_tx,
                         user_id: &user_id,
                         bot_channel: &bot_channel,
                     };
@@ -388,6 +398,9 @@ fn main() {
                     },
                     IrcToSlack::Error(msg) => {
                         post_message(&cli, &c.slack_token, &bot_channel, &msg, None);
+                    },
+                    IrcToSlack::UpdateChannels => {
+                        cli.update_channels().unwrap();
                     },
                 }
             }
