@@ -137,7 +137,7 @@ fn parse_slack_text(text: &str, cli: &slack::RtmClient) -> String {
             m
         };
         static ref FUNCTIONS: Vec<(Regex, Box<Fn(&regex::Captures, &slack::RtmClient) -> String + Sync>)> = vec![
-            (Regex::new(r"<#(C\w+)\|?(\w+)?>").unwrap(), Box::new(|captures: &regex::Captures, cli: &slack::RtmClient| {
+            (Regex::new(r"<#(C\w+)\|?([\w-]+)?>").unwrap(), Box::new(|captures: &regex::Captures, cli: &slack::RtmClient| {
                 if let Some(id) = captures.at(1) {
                     if let Some(channel) = get_channel_with_id(cli, id) {
                         return format!("#{}", channel.name).to_owned()
@@ -145,7 +145,7 @@ fn parse_slack_text(text: &str, cli: &slack::RtmClient) -> String {
                 }
                 captures.at(2).unwrap_or("").to_owned()
             })),
-            (Regex::new(r"<@(U\w+)\|?(\w+)?>").unwrap(), Box::new(|captures: &regex::Captures, cli: &slack::RtmClient| {
+            (Regex::new(r"<@(U\w+)\|?([\w-]+)?>").unwrap(), Box::new(|captures: &regex::Captures, cli: &slack::RtmClient| {
                 if let Some(id) = captures.at(1) {
                     if let Some(user) = get_user_with_id(cli, id) {
                         return format!("@{}", user.name).to_owned()
