@@ -8,6 +8,7 @@ extern crate lazy_static;
 extern crate regex;
 extern crate toml;
 extern crate rustc_serialize;
+extern crate multimap;
 
 use std::fmt::Debug;
 use std::collections::HashMap;
@@ -22,6 +23,7 @@ use log::{LogRecord, LogMetadata, LogLevelFilter};
 use irc::client::prelude::{Command, Response, IrcServer, Server, ServerExt};
 use regex::Regex;
 use rustc_serialize::json::Json;
+use multimap::MultiMap;
 
 struct StdoutLogger;
 
@@ -62,8 +64,8 @@ enum ToSlack {
     Kick { by: Option<String>, chans: Vec<String>, nicks: Vec<String>, reason: Option<String> },
     Join { nick: String, chans: Vec<String> },
     Part { nick: String, chans: Vec<String>, reason: Option<String> },
-    Quit { nick: String, reason: Option<String> },
-    Nick { old_nick: String, new_nick: String },
+    Quit { nick: String, chans: Vec<String>, reason: Option<String> },
+    Nick { old_nick: String, new_nick: String, chans: Vec<String> },
     Mode { by: Option<String>, name: String, modes: String, params: Option<String> },
     Error(String),
     UpdateChannels,
@@ -303,10 +305,6 @@ fn post_message(cli: &slack::RtmClient, token: &str, to: &str, text: &str, usern
     ));
 }
 
-fn get_member_channels(cli: &slack::RtmClient) -> Box<Iterator<Item = slack::Channel>> {
-    Box::new(cli.get_channels().into_iter().filter(|c| c.is_member))
-}
-
 fn main() {
     log::set_logger(|max_log_level| {
         max_log_level.set(LogLevelFilter::Info);
@@ -340,7 +338,7 @@ fn main() {
                     let (client, rx) = cli.login().unwrap();
 
                     // auto-join channels the bot has been invited to
-                    for channel in get_member_channels(&cli) {
+                    for channel in cli.get_channels().into_iter().filter(|c| c.is_member) {
                         irc_tx.send(ToIrc::Join(format!("#{}", channel.name))).unwrap();
                     }
 
@@ -399,16 +397,16 @@ fn main() {
                             post_message(&cli, &c.slack_token, &chan, &format!("*{}* has left (_{}_)", nick, reason), None);
                         }
                     },
-                    ToSlack::Quit { nick, reason } => {
+                    ToSlack::Quit { nick, chans, reason } => {
                         let reason = &reason.unwrap_or("".to_owned());
 
-                        for chan_id in get_member_channels(&cli).map(|c| c.id) {
-                            post_message(&cli, &c.slack_token, &chan_id, &format!("*{}* has quit (_{}_)", nick, reason), None);
+                        for chan in chans {
+                            post_message(&cli, &c.slack_token, &chan, &format!("*{}* has quit (_{}_)", nick, reason), None);
                         }
                     },
-                    ToSlack::Nick { old_nick, new_nick } => {
-                        for chan_id in get_member_channels(&cli).map(|c| c.id) {
-                            post_message(&cli, &c.slack_token, &chan_id, &format!("*{}* is now known as *{}*", old_nick, new_nick), None);
+                    ToSlack::Nick { old_nick, new_nick, chans } => {
+                        for chan in chans {
+                            post_message(&cli, &c.slack_token, &chan, &format!("*{}* is now known as *{}*", old_nick, new_nick), None);
                         }
                     },
                     ToSlack::Mode { by, name, modes, params } => {
@@ -447,6 +445,8 @@ fn main() {
             let server_thread = {
                 let server = server.clone();
                 thread::Builder::new().name("irc_server".to_owned()).spawn(move || {
+                    let mut nick_to_chan: MultiMap<String, String> = MultiMap::new();
+
                     for message in server.iter() {
                         let message = message.unwrap();
                         // extract the nick from the `nick!nick@hostname.com`
@@ -477,24 +477,62 @@ fn main() {
                                 slack_tx.send(ToSlack::Topic { by: sender, chan: channel, topic: topic }).unwrap();
                             },
                             Command::KICK(channels, users, reason) => {
-                                slack_tx.send(ToSlack::Kick {
-                                    by: sender,
-                                    chans: channels.split(",").map(|s| s.to_owned()).collect(),
-                                    nicks: users.split(",").map(|s| s.to_owned()).collect(),
-                                    reason: reason
-                                }).unwrap();
+                                let chans = channels.split(",").map(|s| s.to_owned()).collect::<Vec<_>>();
+                                let nicks = users.split(",").map(|s| s.to_owned()).collect();
+
+                                for nick in &nicks {
+                                    if let Some(mut v) = nick_to_chan.get_vec_mut(nick) {
+                                        v.retain(|c| !chans.contains(c));
+                                    }
+                                }
+
+                                slack_tx.send(ToSlack::Kick { by: sender, chans: chans, nicks: nicks, reason: reason }).unwrap();
                             },
                             Command::JOIN(channels, _, _) => {
-                                slack_tx.send(ToSlack::Join { nick: sender.unwrap(), chans: channels.split(",").map(|s| s.to_owned()).collect() }).unwrap();
+                                let sender = sender.unwrap();
+                                let chans = channels.split(",").map(|s| s.to_owned()).collect::<Vec<_>>();
+
+                                for chan in &chans {
+                                    nick_to_chan.insert(sender.clone(), chan.clone());
+                                }
+
+                                slack_tx.send(ToSlack::Join { nick: sender, chans: chans }).unwrap();
                             },
                             Command::PART(channels, reason) => {
-                                slack_tx.send(ToSlack::Part { nick: sender.unwrap(), chans: channels.split(",").map(|s| s.to_owned()).collect(), reason: reason }).unwrap();
+                                let sender = sender.unwrap();
+                                let chans = channels.split(",").map(|s| s.to_owned()).collect::<Vec<_>>();
+
+                                if let Some(mut v) = nick_to_chan.get_vec_mut(&sender) {
+                                    v.retain(|c| !chans.contains(c));
+                                }
+
+                                slack_tx.send(ToSlack::Part { nick: sender, chans: chans, reason: reason }).unwrap();
                             },
                             Command::QUIT(reason) => {
-                                slack_tx.send(ToSlack::Quit { nick: sender.unwrap(), reason: reason }).unwrap();
+                                let sender = sender.unwrap();
+                                let chans = nick_to_chan.get_vec(&sender).map(|v| v.clone()).unwrap_or(vec![]);
+
+                                nick_to_chan.remove(&sender);
+
+                                slack_tx.send(ToSlack::Quit { nick: sender, chans: chans, reason: reason }).unwrap();
                             },
                             Command::NICK(nick) => {
-                                slack_tx.send(ToSlack::Nick { old_nick: sender.unwrap(), new_nick: nick }).unwrap();
+                                let sender = sender.unwrap();
+                                let chans = nick_to_chan.get_vec(&sender).map(|v| v.clone()).unwrap_or(vec![]);
+
+                                if let Some(v) = nick_to_chan.remove(&sender) {
+                                    match nick_to_chan.entry(nick.clone()) {
+                                        multimap::Entry::Occupied(..) => {
+                                            error!("'{}' changed nick to extant nick '{}'", sender, nick);
+                                            return;
+                                        },
+                                        multimap::Entry::Vacant(e) => {
+                                            e.insert_vec(v);
+                                        },
+                                    }
+                                }
+
+                                slack_tx.send(ToSlack::Nick { old_nick: sender, new_nick: nick, chans: chans }).unwrap();
                             },
                             Command::MODE(name, modes, params) => {
                                 slack_tx.send(ToSlack::Mode { by: sender, name: name, modes: modes, params: params }).unwrap();
@@ -507,6 +545,14 @@ fn main() {
                                     Response::RPL_NOTOPIC | Response::RPL_TOPIC => {
                                         // response to topic request
                                         slack_tx.send(ToSlack::Topic { by: None, chan: args[1].clone(), topic: suffix }).unwrap();
+                                    },
+                                    Response::RPL_NAMREPLY => {
+                                        let ref chan = args[2];
+                                        for nick in suffix.unwrap().trim().replace("@", "").replace("+", "").split(" ").map(|n| n.to_owned()) {
+                                            if nick_to_chan.get_vec(&nick).map(|v| !v.contains(&chan)).unwrap_or(true) {
+                                                nick_to_chan.insert(nick, chan.clone());
+                                            }
+                                        }
                                     },
                                     _ => {
                                         debug!("[IRC] {:?}", Command::Response(resp, args, suffix));
