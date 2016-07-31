@@ -102,6 +102,8 @@ fn parse_slack_text(text: &str, cli: &slack::RtmClient) -> String {
             (Regex::new(r"<!channel>").unwrap(), "@channel"),
             (Regex::new(r"<!group>").unwrap(), "@group"),
             (Regex::new(r"<!everyone>").unwrap(), "@everyone"),
+            // http://google.com|google.com -> google.com
+            (Regex::new(r"\bhttps?://\S+\|(\S+)").unwrap(), "$1"),
         ];
         static ref EMOJIS: HashMap<&'static str, &'static str> = {
             let mut m = HashMap::new();
