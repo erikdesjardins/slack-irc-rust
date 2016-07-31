@@ -13,7 +13,7 @@ extern crate multimap;
 use std::fmt::Debug;
 use std::collections::HashMap;
 use std::thread;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Sender, channel};
 use std::default::Default;
 use std::fs::File;
@@ -430,6 +430,8 @@ fn main() {
     let irc_thread = {
         let c = c.clone();
         thread::Builder::new().name("irc".to_owned()).spawn(move || {
+            let nick_to_chan = Arc::new(Mutex::new(MultiMap::<String, String>::new()));
+
             let config = irc::client::data::Config {
                 nickname: Some(c.irc_nick.clone()),
                 server: Some(c.irc_server.clone()),
@@ -443,10 +445,9 @@ fn main() {
             server.identify().unwrap();
 
             let server_thread = {
+                let nick_to_chan = nick_to_chan.clone();
                 let server = server.clone();
                 thread::Builder::new().name("irc_server".to_owned()).spawn(move || {
-                    let mut nick_to_chan: MultiMap<String, String> = MultiMap::new();
-
                     for message in server.iter() {
                         let message = message.unwrap();
                         // extract the nick from the `nick!nick@hostname.com`
@@ -480,9 +481,12 @@ fn main() {
                                 let chans = channels.split(",").map(|s| s.to_owned()).collect::<Vec<_>>();
                                 let nicks = users.split(",").map(|s| s.to_owned()).collect();
 
-                                for nick in &nicks {
-                                    if let Some(mut v) = nick_to_chan.get_vec_mut(nick) {
-                                        v.retain(|c| !chans.contains(c));
+                                {
+                                    let mut nick_to_chan = nick_to_chan.lock().unwrap();
+                                    for nick in &nicks {
+                                        if let Some(mut v) = nick_to_chan.get_vec_mut(nick) {
+                                            v.retain(|c| !chans.contains(c));
+                                        }
                                     }
                                 }
 
@@ -492,8 +496,11 @@ fn main() {
                                 let sender = sender.unwrap();
                                 let chans = channels.split(",").map(|s| s.to_owned()).collect::<Vec<_>>();
 
-                                for chan in &chans {
-                                    nick_to_chan.insert(sender.clone(), chan.clone());
+                                {
+                                    let mut nick_to_chan = nick_to_chan.lock().unwrap();
+                                    for chan in &chans {
+                                        nick_to_chan.insert(sender.clone(), chan.clone());
+                                    }
                                 }
 
                                 slack_tx.send(ToSlack::Join { nick: sender, chans: chans }).unwrap();
@@ -502,7 +509,7 @@ fn main() {
                                 let sender = sender.unwrap();
                                 let chans = channels.split(",").map(|s| s.to_owned()).collect::<Vec<_>>();
 
-                                if let Some(mut v) = nick_to_chan.get_vec_mut(&sender) {
+                                if let Some(mut v) = nick_to_chan.lock().unwrap().get_vec_mut(&sender) {
                                     v.retain(|c| !chans.contains(c));
                                 }
 
@@ -510,6 +517,7 @@ fn main() {
                             },
                             Command::QUIT(reason) => {
                                 let sender = sender.unwrap();
+                                let mut nick_to_chan = nick_to_chan.lock().unwrap();
                                 let chans = nick_to_chan.get_vec(&sender).map(|v| v.clone()).unwrap_or(vec![]);
 
                                 nick_to_chan.remove(&sender);
@@ -518,6 +526,7 @@ fn main() {
                             },
                             Command::NICK(nick) => {
                                 let sender = sender.unwrap();
+                                let mut nick_to_chan = nick_to_chan.lock().unwrap();
                                 let chans = nick_to_chan.get_vec(&sender).map(|v| v.clone()).unwrap_or(vec![]);
 
                                 if let Some(v) = nick_to_chan.remove(&sender) {
@@ -548,6 +557,7 @@ fn main() {
                                     },
                                     Response::RPL_NAMREPLY => {
                                         let ref chan = args[2];
+                                        let mut nick_to_chan = nick_to_chan.lock().unwrap();
                                         for nick in suffix.unwrap().trim().replace("@", "").replace("+", "").split(" ").map(|n| n.to_owned()) {
                                             if nick_to_chan.get_vec(&nick).map(|v| !v.contains(&chan)).unwrap_or(true) {
                                                 nick_to_chan.insert(nick, chan.clone());
@@ -585,6 +595,10 @@ fn main() {
                         server.send_join(&chan).unwrap();
                     },
                     ToIrc::Part(chan) => {
+                        for (_, v) in nick_to_chan.lock().unwrap().iter_all_mut() {
+                            v.retain(|c| c != &chan);
+                        }
+
                         server.send(Command::PART(chan, None)).unwrap();
                     },
                     ToIrc::Topic { chan, topic } => {
