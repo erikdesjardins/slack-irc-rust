@@ -182,6 +182,26 @@ fn parse_slack_text(text: &str, cli: &slack::RtmClient) -> String {
     })
 }
 
+fn parse_irc_text(text: &str) -> String {
+    lazy_static! {
+        static ref REPLACEMENTS: Vec<(Regex, &'static str)> = vec![
+            // strip formatting; via irc-colors.js
+            // stripStyle str.replace(/([\x0F\x02\x16\x1F])(.+)\1/g, '$2')
+            (Regex::new(r"\x0F(.+)\x0F").unwrap(), "$1"),
+            (Regex::new(r"\x02(.+)\x02").unwrap(), "$1"), // bold
+            (Regex::new(r"\x16(.+)\x16").unwrap(), "$1"),
+            (Regex::new(r"\x1D(.+)\x1D").unwrap(), "$1"), // italics
+            (Regex::new(r"\x1F(.+)\x1F").unwrap(), "$1"), // underline
+            // stripColors str.replace(/\x03\d{0,2}(,\d{0,2}|\x02\x02)?/g, '')
+            (Regex::new(r"\x03\d{0,2}(,\d{0,2}|\x02\x02)?").unwrap(), ""),
+        ];
+    }
+
+    REPLACEMENTS.iter().fold(text.to_owned(), |text, &(ref re, replacement)| {
+        re.replace_all(&text, replacement)
+    })
+}
+
 impl<'a> slack::EventHandler for SlackHandler<'a> {
     fn on_event(&mut self, cli: &mut slack::RtmClient, event: Result<&slack::Event, slack::Error>, raw_json: &str) {
         match event {
@@ -439,6 +459,8 @@ fn main() {
                                 lazy_static! {
                                     static ref ACTION_RE: Regex = Regex::new("^\x01ACTION (.+)\x01$").unwrap();
                                 }
+
+                                let text = parse_irc_text(&text);
 
                                 if ACTION_RE.is_match(&text) {
                                     slack_tx.send(ToSlack::Message {
