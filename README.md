@@ -16,3 +16,7 @@ Based on https://github.com/ekmartin/slack-irc, but in Rust.
 - Native slack `/me` messages work in IRC
 - Slack active/away status sent to IRC
 - Slack channel topic synced to/from IRC
+
+## Known Issues
+
+- Segfaults on Linux when inviting the bot to a channel that was added after initial startup. Caused by a bug in rustc_serialize; fixed in Rust 1.11 or when using MIR trans.
