@@ -1,5 +1,6 @@
 # slack-irc-rust
-Based on https://github.com/ekmartin/slack-irc, but in Rust.
+
+A Rust port of https://github.com/erikdesjardins/slack-irc, which was inspired by https://github.com/ekmartin/slack-irc (and modified for a single user).
 
 ## Usage
 
