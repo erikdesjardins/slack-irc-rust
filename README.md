@@ -20,4 +20,4 @@ Rust port of [erikdesjardins/slack-irc](https://github.com/erikdesjardins/slack-
 
 ## Known Issues
 
-- Segfaults on Linux when inviting the bot to a channel that was added after initial startup. Caused by a bug in rustc_serialize; fixed in Rust 1.11 or when using MIR trans.
+- Segfaults on Linux when inviting the bot to a channel that was added after initial startup. Caused by [a bug in rustc_serialize](https://github.com/rust-lang/rust/issues/34592); fixed in Rust 1.11 or when using MIR trans.
