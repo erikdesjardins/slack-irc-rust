@@ -1,7 +1,11 @@
 # slack-irc-rust
 Based on https://github.com/ekmartin/slack-irc, but in Rust.
 
-There must be a `config.toml` in the CWD, see `example_config.toml` for an example.
+## Usage
+
+- Compile from source with `cargo build --release` (if you don't have a Rust toolchain installed, use [rustup](https://github.com/rust-lang-nursery/rustup.rs))
+- Run as you would any other executable (accepts no command line arguments)
+  - There must be a `config.toml` in the CWD, see `example_config.toml` for an example.
 
 ## Features
 
