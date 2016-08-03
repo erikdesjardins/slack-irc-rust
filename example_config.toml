@@ -1,5 +1,5 @@
-irc_nick = "irc nickname"
+irc_nick = "nickname"
 irc_server = "irc.example.org"
 irc_password = "password (optional)"
 slack_user = "your slack username (not the bot's)"
-slack_token = "my slack token"
+slack_token = "xxxx-xxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx"
