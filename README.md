@@ -1,6 +1,6 @@
 # slack-irc-rust
 
-A Rust port of https://github.com/erikdesjardins/slack-irc, which was inspired by https://github.com/ekmartin/slack-irc (and modified for a single user).
+A Rust port of [erikdesjardins/slack-irc](https://github.com/erikdesjardins/slack-irc), which was inspired by [ekmartin/slack-irc](https://github.com/ekmartin/slack-irc) (and modified for a single user).
 
 ## Usage
 
