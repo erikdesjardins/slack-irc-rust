@@ -533,11 +533,13 @@ fn main() {
                                 let mut nick_to_chan = nick_to_chan.lock().unwrap();
                                 let chans = nick_to_chan.get_vec(&sender).map(|v| v.clone()).unwrap_or(vec![]);
 
-                                if let Some(v) = nick_to_chan.remove(&sender) {
+                                if let Some(mut v) = nick_to_chan.remove(&sender) {
                                     match nick_to_chan.entry(nick.clone()) {
-                                        multimap::Entry::Occupied(..) => {
-                                            error!("'{}' changed nick to extant nick '{}'", sender, nick);
-                                            return;
+                                        multimap::Entry::Occupied(mut e) => {
+                                            warn!("'{}' changed nick to extant nick '{}'", sender, nick);
+                                            let mut v_ = e.get_vec_mut();
+                                            v_.clear();
+                                            v_.append(&mut v);
                                         },
                                         multimap::Entry::Vacant(e) => {
                                             e.insert_vec(v);
