@@ -9,6 +9,7 @@ extern crate regex;
 extern crate toml;
 extern crate rustc_serialize;
 extern crate multimap;
+extern crate time;
 
 use std::fmt::Debug;
 use std::collections::HashMap;
@@ -33,7 +34,7 @@ impl log::Log for StdoutLogger {
     }
 
     fn log(&self, record: &LogRecord) {
-        println!("[{}] {}", record.level(), record.args());
+        println!("[{}] [{}] {}", time::now().strftime("%Y-%m-%d %T").unwrap(), record.level(), record.args());
     }
 }
 
