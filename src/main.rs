@@ -25,6 +25,7 @@ use irc::client::prelude::{Command, Response, IrcServer, Server, ServerExt};
 use regex::Regex;
 use rustc_serialize::json::Json;
 use multimap::MultiMap;
+use time::Tm;
 
 struct StdoutLogger;
 
@@ -68,8 +69,24 @@ enum ToSlack {
     Quit { nick: String, chans: Vec<String>, reason: Option<String> },
     Nick { old_nick: String, new_nick: String, chans: Vec<String> },
     Mode { by: Option<String>, name: String, modes: String, params: Option<String> },
+    Whois(String, Whois),
     Error(String),
     UpdateChannels,
+}
+
+#[derive(Debug)]
+enum Whois {
+    User { user: String, host: String, real_name: String },
+    Host(String),
+    Channels(Vec<String>),
+    Server { server: String, server_info: String },
+    Modes(String),
+    Away(String),
+    Account { msg: String, account: String },
+    Registered(String),
+    Secure(String),
+    Idle { seconds: u32, signon: Tm },
+    End(String),
 }
 
 struct SlackHandler<'a> {
@@ -419,6 +436,33 @@ fn main() {
                             post_message(&cli, &c.slack_token, &name, &format!("*{}* sets mode *{}* on _{}_", by.unwrap_or("server".to_owned()), modes, params.unwrap_or(name.clone())), None);
                         }
                     },
+                    ToSlack::Whois(nick, info) => {
+                        let info = match info {
+                            Whois::User { user, host, real_name } => {
+                                format!("(_{}@{}_): _{}_", user, host, real_name)
+                            },
+                            Whois::Channels(chans) => {
+                                format!("is in channels {}", chans.join(", "))
+                            },
+                            Whois::Server { server, server_info } => {
+                                format!("_{}_ :_{}_", server, server_info)
+                            },
+                            Whois::Away(reason) => {
+                                format!("is away (_{}_)", reason)
+                            },
+                            Whois::Account { msg, account } => {
+                                format!("{} _{}_", msg, account)
+                            },
+                            Whois::Idle { seconds, signon } => {
+                                format!("idle {}s, signon: {}", seconds, signon.to_local().rfc822())
+                            },
+                            Whois::Host(msg) | Whois::Modes(msg) | Whois::Registered(msg) | Whois::Secure(msg) | Whois::End(msg) => {
+                                msg
+                            },
+                        };
+
+                        post_message(&cli, &c.slack_token, &bot_channel, &format!("[*{}*] {}", nick, info), None);
+                    },
                     ToSlack::Error(msg) => {
                         post_message(&cli, &c.slack_token, &bot_channel, &msg, None);
                     },
@@ -571,10 +615,63 @@ fn main() {
                                             }
                                         }
                                     },
+                                    Response::RPL_WHOISUSER => {
+                                        slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::User {
+                                            user: args[2].clone(),
+                                            host: args[3].clone(),
+                                            real_name: suffix.unwrap_or("".to_owned())
+                                        })).unwrap();
+                                    },
+                                    Response::RPL_WHOISCHANNELS => {
+                                        slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::Channels(
+                                            suffix.unwrap().trim().replace("@", "").replace("+", "").split(" ").map(|s| s.to_owned()).collect()
+                                        ))).unwrap();
+                                    },
+                                    Response::RPL_WHOISSERVER => {
+                                        slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::Server {
+                                            server: args[2].clone(),
+                                            server_info: suffix.unwrap_or("".to_owned())
+                                        })).unwrap();
+                                    },
+                                    Response::RPL_AWAY => {
+                                        slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::Away(suffix.unwrap()))).unwrap();
+                                    },
+                                    Response::RPL_WHOISIDLE => {
+                                        slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::Idle {
+                                            seconds: args[2].parse().unwrap(),
+                                            signon: time::strptime(&args[3], "%s").unwrap(),
+                                        })).unwrap();
+                                    },
+                                    Response::RPL_ENDOFWHOIS => {
+                                        slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::End(suffix.unwrap_or("End of WHOIS list.".to_owned())))).unwrap();
+                                    },
                                     _ => {
                                         debug!("[IRC] {:?}", Command::Response(resp, args, suffix));
                                     },
                                 }
+                            },
+                            Command::Raw(id, args, suffix) => match id.as_str() {
+                                "307" => { // RPL_WHOISREGNICK
+                                    slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::Registered(suffix.unwrap()))).unwrap();
+                                },
+                                "330" => { // RPL_WHOISACCOUNT
+                                    slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::Account {
+                                        msg: suffix.unwrap_or("is logged in as".to_owned()),
+                                        account: args[2].clone()
+                                    })).unwrap();
+                                },
+                                "378" => { // RPL_WHOISHOST
+                                    slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::Host(suffix.unwrap()))).unwrap();
+                                },
+                                "379" => { // RPL_WHOISMODES
+                                    slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::Modes(suffix.unwrap()))).unwrap();
+                                },
+                                "671" => { // RPL_WHOISSECURE
+                                    slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::Secure(suffix.unwrap()))).unwrap();
+                                },
+                                _ => {
+                                    debug!("[IRC] {:?}", Command::Raw(id, args, suffix));
+                                },
                             },
                             msg => {
                                 debug!("[IRC] {:?}", msg);
