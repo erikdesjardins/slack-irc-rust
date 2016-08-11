@@ -619,7 +619,7 @@ fn main() {
                                         slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::User {
                                             user: args[2].clone(),
                                             host: args[3].clone(),
-                                            real_name: suffix.unwrap_or("".to_owned())
+                                            real_name: suffix.unwrap()
                                         })).unwrap();
                                     },
                                     Response::RPL_WHOISCHANNELS => {
@@ -630,7 +630,7 @@ fn main() {
                                     Response::RPL_WHOISSERVER => {
                                         slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::Server {
                                             server: args[2].clone(),
-                                            server_info: suffix.unwrap_or("".to_owned())
+                                            server_info: suffix.unwrap()
                                         })).unwrap();
                                     },
                                     Response::RPL_AWAY => {
@@ -643,7 +643,7 @@ fn main() {
                                         })).unwrap();
                                     },
                                     Response::RPL_ENDOFWHOIS => {
-                                        slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::End(suffix.unwrap_or("End of WHOIS list.".to_owned())))).unwrap();
+                                        slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::End(suffix.unwrap()))).unwrap();
                                     },
                                     _ => {
                                         debug!("[IRC] {:?}", Command::Response(resp, args, suffix));
@@ -656,7 +656,7 @@ fn main() {
                                 },
                                 "330" => { // RPL_WHOISACCOUNT
                                     slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::Account {
-                                        msg: suffix.unwrap_or("is logged in as".to_owned()),
+                                        msg: suffix.unwrap(),
                                         account: args[2].clone()
                                     })).unwrap();
                                 },
