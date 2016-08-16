@@ -19,6 +19,7 @@ use std::sync::mpsc::{Sender, channel};
 use std::default::Default;
 use std::fs::File;
 use std::io::prelude::*;
+use std::time::Duration;
 
 use log::{LogRecord, LogMetadata, LogLevelFilter};
 use irc::client::prelude::{Command, Response, IrcServer, Server, ServerExt};
@@ -347,7 +348,12 @@ fn main() {
         let slack_tx = slack_tx.clone();
         thread::Builder::new().name("slack".into()).spawn(move || {
             let mut cli = slack::RtmClient::new(&c.slack_token);
-            cli.login().expect("logging into Slack (client)");
+            cli.login().expect("logging into Slack");
+
+            // auto-join channels the bot has been invited to
+            for channel in cli.get_channels().into_iter().filter(|c| c.is_member) {
+                irc_tx.send(ToIrc::Join(format!("#{}", channel.name))).unwrap();
+            }
 
             let user_id = cli.get_user_id(&c.slack_user).expect("user id of Slack user").clone();
             let bot_channel = cli.im_open(&user_id).expect("IM channel with Slack bot").channel.id;
@@ -357,13 +363,6 @@ fn main() {
                 let bot_channel = bot_channel.clone();
                 thread::Builder::new().name("slack_recv".into()).spawn(move || {
                     let mut cli = slack::RtmClient::new(&c.slack_token);
-                    let (client, rx) = cli.login().expect("logging into Slack (server)");
-
-                    // auto-join channels the bot has been invited to
-                    for channel in cli.get_channels().into_iter().filter(|c| c.is_member) {
-                        irc_tx.send(ToIrc::Join(format!("#{}", channel.name))).unwrap();
-                    }
-
                     let mut handler = SlackHandler {
                         irc_tx: &irc_tx,
                         slack_tx: &slack_tx,
@@ -371,7 +370,10 @@ fn main() {
                         bot_channel: &bot_channel,
                     };
 
-                    cli.run(&mut handler, client, rx).expect("running Slack handler");
+                    while let Err(e) = cli.login_and_run(&mut handler) {
+                        slack_tx.send(ToSlack::Error(format!("{:?}", e))).unwrap();
+                        thread::sleep(Duration::from_secs(1));
+                    }
                 }).unwrap()
             };
 
