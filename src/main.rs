@@ -61,14 +61,14 @@ enum ToIrc {
 
 #[derive(Debug)]
 enum ToSlack {
-    Message { to: String, from: Option<String>, msg: String },
+    Message { to: String, from: String, msg: String },
     Topic { by: Option<String>, chan: String, topic: Option<String> },
-    Kick { by: Option<String>, chans: Vec<String>, nicks: Vec<String>, reason: Option<String> },
+    Kick { by: String, chans: Vec<String>, nicks: Vec<String>, reason: Option<String> },
     Join { nick: String, chans: Vec<String> },
     Part { nick: String, chans: Vec<String>, reason: Option<String> },
     Quit { nick: String, chans: Vec<String>, reason: Option<String> },
     Nick { old_nick: String, new_nick: String, chans: Vec<String> },
-    Mode { by: Option<String>, name: String, modes: String, params: Option<String> },
+    Mode { by: String, name: String, modes: String, params: Option<String> },
     Whois(String, Whois),
     Error(String),
     UpdateChannels,
@@ -247,17 +247,17 @@ impl<'a> slack::EventHandler for SlackHandler<'a> {
                             log_err(cli.send_message(channel, "_no message sent, are you missing a `user: ` prefix?_"));
                         }
                     } else {
-                        self.irc_tx.send(ToIrc::Message { to: format!("#{}", get_channel_with_id(cli, channel).unwrap().name), msg: text.clone() }).unwrap();
+                        self.irc_tx.send(ToIrc::Message { to: format!("#{}", get_channel_with_id(cli, channel).expect("channel with id").name), msg: text.clone() }).unwrap();
                     }
                 },
                 &slack::Message::MeMessage { ref channel, ref user, ref text, .. } if user == self.user_id => {
                     let text = parse_slack_text(&text, cli);
 
-                    self.irc_tx.send(ToIrc::MeMessage { to: format!("#{}", get_channel_with_id(cli, channel).unwrap().name), msg: text.clone() }).unwrap();
+                    self.irc_tx.send(ToIrc::MeMessage { to: format!("#{}", get_channel_with_id(cli, channel).expect("channel with id").name), msg: text.clone() }).unwrap();
                 },
                 &slack::Message::ChannelTopic { ref user, ref topic, .. } if user == self.user_id => {
-                    if let Some(channel) = Json::from_str(raw_json).unwrap().find("channel").and_then(|j| j.as_string()) {
-                        self.irc_tx.send(ToIrc::Topic { chan: format!("#{}", get_channel_with_id(cli, channel).unwrap().name), topic: topic.clone() }).unwrap();
+                    if let Some(channel) = Json::from_str(raw_json).expect("ChannelTopic message json").find("channel").and_then(|j| j.as_string()) {
+                        self.irc_tx.send(ToIrc::Topic { chan: format!("#{}", get_channel_with_id(cli, channel).expect("channel with id").name), topic: topic.clone() }).unwrap();
                     }
                 },
                 _ => {
@@ -270,14 +270,14 @@ impl<'a> slack::EventHandler for SlackHandler<'a> {
             Ok(&slack::Event::ChannelJoined { ref channel }) => {
                 if cli.get_channels().into_iter().find(|c| c.id == channel.id).is_none() {
                     // we haven't seen this channel before, so update channels
-                    cli.update_channels().unwrap();
+                    cli.update_channels().expect("updating channels");
                     // also update the other `cli` instance
                     self.slack_tx.send(ToSlack::UpdateChannels).unwrap();
                 }
                 self.irc_tx.send(ToIrc::Join(format!("#{}", channel.name))).unwrap();
             },
             Ok(&slack::Event::ChannelLeft { ref channel }) => {
-                self.irc_tx.send(ToIrc::Part(format!("#{}", get_channel_with_id(cli, channel).unwrap().name))).unwrap();
+                self.irc_tx.send(ToIrc::Part(format!("#{}", get_channel_with_id(cli, channel).expect("channel with id").name))).unwrap();
             },
             evt => {
                 debug!("[SLACK] {:?}", evt);
@@ -336,7 +336,7 @@ fn main() {
     let c: Arc<Config> = {
         let mut s: String = String::new();
         File::open(&"config.toml").and_then(|mut f| f.read_to_string(&mut s)).unwrap();
-        toml::decode_str::<Config>(&s).unwrap().into()
+        toml::decode_str::<Config>(&s).expect("parse config").into()
     };
 
     let (slack_tx, slack_rx) = channel::<ToSlack>();
@@ -347,17 +347,17 @@ fn main() {
         let slack_tx = slack_tx.clone();
         thread::Builder::new().name("slack".to_owned()).spawn(move || {
             let mut cli = slack::RtmClient::new(&c.slack_token);
-            cli.login().unwrap();
+            cli.login().expect("logging into Slack (client)");
 
-            let user_id = cli.get_user_id(&c.slack_user).unwrap().clone();
-            let bot_channel = cli.im_open(&user_id).unwrap().channel.id;
+            let user_id = cli.get_user_id(&c.slack_user).expect("user id of Slack user").clone();
+            let bot_channel = cli.im_open(&user_id).expect("IM channel with Slack bot").channel.id;
 
             let recv_thread = {
                 let c = c.clone();
                 let bot_channel = bot_channel.clone();
                 thread::Builder::new().name("slack_recv".to_owned()).spawn(move || {
                     let mut cli = slack::RtmClient::new(&c.slack_token);
-                    let (client, rx) = cli.login().unwrap();
+                    let (client, rx) = cli.login().expect("logging into Slack (server)");
 
                     // auto-join channels the bot has been invited to
                     for channel in cli.get_channels().into_iter().filter(|c| c.is_member) {
@@ -371,7 +371,7 @@ fn main() {
                         bot_channel: &bot_channel,
                     };
 
-                    cli.run(&mut handler, client, rx).unwrap();
+                    cli.run(&mut handler, client, rx).expect("running Slack handler");
                 }).unwrap()
             };
 
@@ -387,9 +387,7 @@ fn main() {
                             &bot_channel
                         };
 
-                        let from = from.as_ref().map(|s| s.as_ref());
-
-                        post_message(&cli, &c.slack_token, to, &msg, from);
+                        post_message(&cli, &c.slack_token, to, &msg, Some(&from));
                     },
                     ToSlack::Topic { by, chan, topic } => {
                         if let Some(by) = by {
@@ -398,7 +396,6 @@ fn main() {
                         log_err(cli.set_topic(&chan, &topic.unwrap_or("".to_owned()).chars().take(250).collect::<String>()));
                     },
                     ToSlack::Kick { by, chans, nicks, reason } => {
-                        let by = &by.unwrap_or("server".to_owned());
                         let reason = &reason.unwrap_or("".to_owned());
 
                         for chan in chans {
@@ -433,7 +430,7 @@ fn main() {
                     },
                     ToSlack::Mode { by, name, modes, params } => {
                         if name.starts_with("#") {
-                            post_message(&cli, &c.slack_token, &name, &format!("*{}* sets mode *{}* on _{}_", by.unwrap_or("server".to_owned()), modes, params.unwrap_or(name.clone())), None);
+                            post_message(&cli, &c.slack_token, &name, &format!("*{}* sets mode *{}* on _{}_", by, modes, params.unwrap_or(name.clone())), None);
                         }
                     },
                     ToSlack::Whois(nick, info) => {
@@ -467,12 +464,12 @@ fn main() {
                         post_message(&cli, &c.slack_token, &bot_channel, &msg, None);
                     },
                     ToSlack::UpdateChannels => {
-                        cli.update_channels().unwrap();
+                        cli.update_channels().expect("updating channels");
                     },
                 }
             }
 
-            recv_thread.join().unwrap();
+            recv_thread.join().expect("joining Slack recv thread");
         }).unwrap()
     };
 
@@ -491,16 +488,16 @@ fn main() {
 
             let server = IrcServer::from_config(config).unwrap();
 
-            server.identify().unwrap();
+            server.identify().expect("logging into IRC");
 
             let server_thread = {
                 let nick_to_chan = nick_to_chan.clone();
                 let server = server.clone();
                 thread::Builder::new().name("irc_server".to_owned()).spawn(move || {
                     for message in server.iter() {
-                        let message = message.unwrap();
+                        let message = message.expect("IRC message");
                         // extract the nick from the `nick!nick@hostname.com`
-                        let sender = message.prefix.and_then(|prefix| prefix.split("!").nth(0).map(|s| s.to_owned()));
+                        let sender = message.prefix.and_then(|prefix| prefix.split("!").nth(0).map(|s| s.to_owned())).unwrap_or("".to_owned()); // only None for `Ping`, AFAICT
                         match message.command {
                             Command::ERROR(msg) => {
                                 slack_tx.send(ToSlack::Error(msg)).unwrap();
@@ -524,7 +521,7 @@ fn main() {
                             },
                             Command::TOPIC(channel, topic) => {
                                 // topic set by a user while we're in the channel
-                                slack_tx.send(ToSlack::Topic { by: sender, chan: channel, topic: topic }).unwrap();
+                                slack_tx.send(ToSlack::Topic { by: Some(sender), chan: channel, topic: topic }).unwrap();
                             },
                             Command::KICK(channels, users, reason) => {
                                 let chans = channels.split(",").map(|s| s.to_owned()).collect::<Vec<_>>();
@@ -542,7 +539,6 @@ fn main() {
                                 slack_tx.send(ToSlack::Kick { by: sender, chans: chans, nicks: nicks, reason: reason }).unwrap();
                             },
                             Command::JOIN(channels, _, _) => {
-                                let sender = sender.unwrap();
                                 let chans = channels.split(",").map(|s| s.to_owned()).collect::<Vec<_>>();
 
                                 {
@@ -555,7 +551,6 @@ fn main() {
                                 slack_tx.send(ToSlack::Join { nick: sender, chans: chans }).unwrap();
                             },
                             Command::PART(channels, reason) => {
-                                let sender = sender.unwrap();
                                 let chans = channels.split(",").map(|s| s.to_owned()).collect::<Vec<_>>();
 
                                 if let Some(mut v) = nick_to_chan.lock().unwrap().get_vec_mut(&sender) {
@@ -565,7 +560,6 @@ fn main() {
                                 slack_tx.send(ToSlack::Part { nick: sender, chans: chans, reason: reason }).unwrap();
                             },
                             Command::QUIT(reason) => {
-                                let sender = sender.unwrap();
                                 let mut nick_to_chan = nick_to_chan.lock().unwrap();
                                 let chans = nick_to_chan.get_vec(&sender).map(|v| v.clone()).unwrap_or(vec![]);
 
@@ -574,7 +568,6 @@ fn main() {
                                 slack_tx.send(ToSlack::Quit { nick: sender, chans: chans, reason: reason }).unwrap();
                             },
                             Command::NICK(nick) => {
-                                let sender = sender.unwrap();
                                 let mut nick_to_chan = nick_to_chan.lock().unwrap();
                                 let chans = nick_to_chan.get_vec(&sender).map(|v| v.clone()).unwrap_or(vec![]);
 
@@ -638,8 +631,8 @@ fn main() {
                                     },
                                     Response::RPL_WHOISIDLE => {
                                         slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::Idle {
-                                            seconds: args[2].parse().unwrap(),
-                                            signon: time::strptime(&args[3], "%s").unwrap(),
+                                            seconds: args[2].parse().expect("seconds from idle time"),
+                                            signon: time::strptime(&args[3], "%s").expect("time from signon time"),
                                         })).unwrap();
                                     },
                                     Response::RPL_ENDOFWHOIS => {
@@ -715,6 +708,6 @@ fn main() {
         }).unwrap()
     };
 
-    slack_thread.join().unwrap();
-    irc_thread.join().unwrap();
+    slack_thread.join().expect("join Slack thread");
+    irc_thread.join().expect("join IRC thread");
 }
