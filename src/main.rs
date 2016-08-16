@@ -166,36 +166,36 @@ fn parse_slack_text(text: &str, cli: &slack::RtmClient) -> String {
             (Regex::new(r"<#(C\w+)\|?([\w-]+)?>").unwrap(), Box::new(|captures: &regex::Captures, cli: &slack::RtmClient| {
                 if let Some(id) = captures.at(1) {
                     if let Some(channel) = get_channel_with_id(cli, id) {
-                        return format!("#{}", channel.name).to_owned()
+                        return format!("#{}", channel.name).into()
                     }
                 }
-                captures.at(2).unwrap_or("").to_owned()
+                captures.at(2).unwrap_or("").into()
             })),
             (Regex::new(r"<@(U\w+)\|?([\w-]+)?>").unwrap(), Box::new(|captures: &regex::Captures, cli: &slack::RtmClient| {
                 if let Some(id) = captures.at(1) {
                     if let Some(user) = get_user_with_id(cli, id) {
-                        return format!("@{}", user.name).to_owned()
+                        return format!("@{}", user.name).into()
                     }
                 }
-                captures.at(2).unwrap_or("").to_owned()
+                captures.at(2).unwrap_or("").into()
             })),
             (Regex::new(r"<([^!]\S+)>").unwrap(), Box::new(|captures: &regex::Captures, _| {
-                captures.at(1).unwrap_or("").to_owned()
+                captures.at(1).unwrap_or("").into()
             })),
             (Regex::new(r"<!(\w+)\|?(\w+)?>").unwrap(), Box::new(|captures: &regex::Captures, _| {
-                format!("<{}>", captures.at(2).or(captures.at(1)).unwrap_or("")).to_owned()
+                format!("<{}>", captures.at(2).or(captures.at(1)).unwrap_or("")).into()
             })),
             (Regex::new(r":(\w+):").unwrap(), Box::new(|captures: &regex::Captures, _| {
                 if let Some(&emoji) = EMOJIS.get(captures.at(1).unwrap()) {
-                    emoji.to_owned()
+                    emoji.into()
                 } else {
-                    captures.at(0).unwrap().to_owned()
+                    captures.at(0).unwrap().into()
                 }
             })),
         ];
     }
 
-    let text = REPLACEMENTS.iter().fold(text.to_owned(), |text, &(ref re, replacement)| {
+    let text = REPLACEMENTS.iter().fold(text.into(), |text: String, &(ref re, replacement)| {
         re.replace_all(&text, replacement)
     });
 
@@ -221,7 +221,7 @@ fn parse_irc_text(text: &str) -> String {
         ];
     }
 
-    REPLACEMENTS.iter().fold(text.to_owned(), |text, &(ref re, replacement)| {
+    REPLACEMENTS.iter().fold(text.into(), |text, &(ref re, replacement)| {
         re.replace_all(&text, replacement)
     })
 }
@@ -238,11 +238,11 @@ impl<'a> slack::EventHandler for SlackHandler<'a> {
                     let text = parse_slack_text(&text, cli);
 
                     if text.starts_with("%") {
-                        self.irc_tx.send(ToIrc::Raw(text[1..].to_owned())).unwrap();
+                        self.irc_tx.send(ToIrc::Raw(text[1..].into())).unwrap();
                         log_err(cli.send_message(channel, "_sent raw command_"));
                     } else if channel == self.bot_channel {
                         if let Some(captures) = PM_RE.captures(&text) {
-                            self.irc_tx.send(ToIrc::Message { to: captures.at(1).unwrap().to_owned(), msg: captures.at(2).unwrap().to_owned() }).unwrap();
+                            self.irc_tx.send(ToIrc::Message { to: captures.at(1).unwrap().into(), msg: captures.at(2).unwrap().into() }).unwrap();
                         } else {
                             log_err(cli.send_message(channel, "_no message sent, are you missing a `user: ` prefix?_"));
                         }
@@ -345,7 +345,7 @@ fn main() {
     let slack_thread = {
         let c = c.clone();
         let slack_tx = slack_tx.clone();
-        thread::Builder::new().name("slack".to_owned()).spawn(move || {
+        thread::Builder::new().name("slack".into()).spawn(move || {
             let mut cli = slack::RtmClient::new(&c.slack_token);
             cli.login().expect("logging into Slack (client)");
 
@@ -355,7 +355,7 @@ fn main() {
             let recv_thread = {
                 let c = c.clone();
                 let bot_channel = bot_channel.clone();
-                thread::Builder::new().name("slack_recv".to_owned()).spawn(move || {
+                thread::Builder::new().name("slack_recv".into()).spawn(move || {
                     let mut cli = slack::RtmClient::new(&c.slack_token);
                     let (client, rx) = cli.login().expect("logging into Slack (server)");
 
@@ -393,10 +393,10 @@ fn main() {
                         if let Some(by) = by {
                             post_message(&cli, &c.slack_token, &chan, &format!("*{}* has changed the topic", by), None);
                         }
-                        log_err(cli.set_topic(&chan, &topic.unwrap_or("".to_owned()).chars().take(250).collect::<String>()));
+                        log_err(cli.set_topic(&chan, &topic.unwrap_or("".into()).chars().take(250).collect::<String>()));
                     },
                     ToSlack::Kick { by, chans, nicks, reason } => {
-                        let reason = &reason.unwrap_or("".to_owned());
+                        let reason = &reason.unwrap_or("".into());
 
                         for chan in chans {
                             for nick in &nicks {
@@ -410,14 +410,14 @@ fn main() {
                         }
                     },
                     ToSlack::Part { nick, chans, reason } => {
-                        let reason = &reason.unwrap_or("".to_owned());
+                        let reason = &reason.unwrap_or("".into());
 
                         for chan in chans {
                             post_message(&cli, &c.slack_token, &chan, &format!("*{}* has left (_{}_)", nick, reason), None);
                         }
                     },
                     ToSlack::Quit { nick, chans, reason } => {
-                        let reason = &reason.unwrap_or("".to_owned());
+                        let reason = &reason.unwrap_or("".into());
 
                         for chan in chans {
                             post_message(&cli, &c.slack_token, &chan, &format!("*{}* has quit (_{}_)", nick, reason), None);
@@ -475,7 +475,7 @@ fn main() {
 
     let irc_thread = {
         let c = c.clone();
-        thread::Builder::new().name("irc".to_owned()).spawn(move || {
+        thread::Builder::new().name("irc".into()).spawn(move || {
             let nick_to_chan = Arc::new(Mutex::new(MultiMap::<String, String>::new()));
 
             let config = irc::client::data::Config {
@@ -493,11 +493,11 @@ fn main() {
             let server_thread = {
                 let nick_to_chan = nick_to_chan.clone();
                 let server = server.clone();
-                thread::Builder::new().name("irc_server".to_owned()).spawn(move || {
+                thread::Builder::new().name("irc_server".into()).spawn(move || {
                     for message in server.iter() {
                         let message = message.expect("IRC message");
                         // extract the nick from the `nick!nick@hostname.com`
-                        let sender = message.prefix.and_then(|prefix| prefix.split("!").nth(0).map(|s| s.to_owned())).unwrap_or("".to_owned()); // only None for `Ping`, AFAICT
+                        let sender = message.prefix.and_then(|prefix| prefix.split("!").nth(0).map(Into::into)).unwrap_or("".into()); // only `None` for `Ping`, AFAICT
                         match message.command {
                             Command::ERROR(msg) => {
                                 slack_tx.send(ToSlack::Error(msg)).unwrap();
@@ -524,8 +524,8 @@ fn main() {
                                 slack_tx.send(ToSlack::Topic { by: Some(sender), chan: channel, topic: topic }).unwrap();
                             },
                             Command::KICK(channels, users, reason) => {
-                                let chans = channels.split(",").map(|s| s.to_owned()).collect::<Vec<_>>();
-                                let nicks = users.split(",").map(|s| s.to_owned()).collect();
+                                let chans = channels.split(",").map(Into::into).collect::<Vec<_>>();
+                                let nicks = users.split(",").map(Into::into).collect();
 
                                 {
                                     let mut nick_to_chan = nick_to_chan.lock().unwrap();
@@ -539,7 +539,7 @@ fn main() {
                                 slack_tx.send(ToSlack::Kick { by: sender, chans: chans, nicks: nicks, reason: reason }).unwrap();
                             },
                             Command::JOIN(channels, _, _) => {
-                                let chans = channels.split(",").map(|s| s.to_owned()).collect::<Vec<_>>();
+                                let chans = channels.split(",").map(Into::into).collect::<Vec<String>>();
 
                                 {
                                     let mut nick_to_chan = nick_to_chan.lock().unwrap();
@@ -551,7 +551,7 @@ fn main() {
                                 slack_tx.send(ToSlack::Join { nick: sender, chans: chans }).unwrap();
                             },
                             Command::PART(channels, reason) => {
-                                let chans = channels.split(",").map(|s| s.to_owned()).collect::<Vec<_>>();
+                                let chans = channels.split(",").map(Into::into).collect::<Vec<_>>();
 
                                 if let Some(mut v) = nick_to_chan.lock().unwrap().get_vec_mut(&sender) {
                                     v.retain(|c| !chans.contains(c));
@@ -592,7 +592,7 @@ fn main() {
                             },
                             Command::Response(resp, args, suffix) => if resp.is_error() {
                                 // error responses
-                                slack_tx.send(ToSlack::Error(format!("{:?}: {} <{}>", resp, suffix.unwrap_or("".to_owned()), args.join(" ")))).unwrap();
+                                slack_tx.send(ToSlack::Error(format!("{:?}: {} <{}>", resp, suffix.unwrap_or("".into()), args.join(" ")))).unwrap();
                             } else {
                                 match resp {
                                     Response::RPL_NOTOPIC | Response::RPL_TOPIC => {
@@ -602,7 +602,7 @@ fn main() {
                                     Response::RPL_NAMREPLY => {
                                         let ref chan = args[2];
                                         let mut nick_to_chan = nick_to_chan.lock().unwrap();
-                                        for nick in suffix.unwrap().trim().replace("@", "").replace("+", "").split(" ").map(|n| n.to_owned()) {
+                                        for nick in suffix.unwrap().trim().replace("@", "").replace("+", "").split(" ").map(Into::into) {
                                             if nick_to_chan.get_vec(&nick).map(|v| !v.contains(&chan)).unwrap_or(true) {
                                                 nick_to_chan.insert(nick, chan.clone());
                                             }
@@ -617,7 +617,7 @@ fn main() {
                                     },
                                     Response::RPL_WHOISCHANNELS => {
                                         slack_tx.send(ToSlack::Whois(args[1].clone(), Whois::Channels(
-                                            suffix.unwrap().trim().replace("@", "").replace("+", "").split(" ").map(|s| s.to_owned()).collect()
+                                            suffix.unwrap().trim().replace("@", "").replace("+", "").split(" ").map(Into::into).collect()
                                         ))).unwrap();
                                     },
                                     Response::RPL_WHOISSERVER => {
@@ -686,7 +686,7 @@ fn main() {
                         server.send(Command::Raw(msg, vec![], None)).unwrap();
                     },
                     ToIrc::Away(is_away) => {
-                        server.send(Command::AWAY(Some(if is_away { " ".to_owned() } else { "".to_owned() }))).unwrap();
+                        server.send(Command::AWAY(Some(if is_away { " ".into() } else { "".into() }))).unwrap();
                     },
                     ToIrc::Join(chan) => {
                         server.send_join(&chan).unwrap();
