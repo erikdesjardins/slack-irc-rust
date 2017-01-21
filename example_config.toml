@@ -1,6 +1,6 @@
 irc_nick = "nickname"
 irc_server = "irc.example.org"
 irc_port = 80 # optional, defaults to 6697
-irc_password = "password (optional)"
+irc_password = "password" # optional
 slack_user = "your slack username (not the bot's)"
 slack_token = "xxxx-xxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx"
