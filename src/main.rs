@@ -46,6 +46,7 @@ struct Config {
     irc_nick: String,
     irc_server: String,
     irc_port: Option<u16>,
+    irc_ssl: Option<bool>,
     irc_password: Option<String>,
     slack_user: String,
     slack_token: String,
@@ -488,7 +489,7 @@ fn main() {
                 server: Some(c.irc_server.clone()),
                 port: c.irc_port,
                 password: c.irc_password.clone(),
-                use_ssl: Some(true),
+                use_ssl: c.irc_ssl.or(Some(true)),
                 ..Default::default()
             };
 
