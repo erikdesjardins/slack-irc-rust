@@ -1,3 +1,4 @@
+extern crate futures;
 #[macro_use]
 extern crate log;
 extern crate irc;
@@ -22,6 +23,8 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::time::Duration;
 
+use futures::sync::oneshot;
+use futures::*;
 use log::{LogRecord, LogMetadata, LogLevelFilter};
 use irc::client::prelude::{Command, Response, IrcServer, Server, ServerExt};
 use regex::Regex;
@@ -50,6 +53,11 @@ struct Config {
     irc_password: Option<String>,
     slack_user: String,
     slack_token: String,
+}
+
+#[derive(Debug)]
+struct IrcInit {
+    channels: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -346,6 +354,7 @@ fn main() {
 
     let (slack_tx, slack_rx) = channel::<ToSlack>();
     let (irc_tx, irc_rx) = channel::<ToIrc>();
+    let (irc_init_tx, irc_init_rx) = oneshot::channel::<IrcInit>();
 
     let slack_thread = {
         let c = c.clone();
@@ -354,10 +363,13 @@ fn main() {
             let mut cli = slack::RtmClient::new(&c.slack_token);
             cli.login().expect("logging into Slack");
 
-            // auto-join channels the bot has been invited to
-            for channel in cli.get_channels().into_iter().filter(|c| c.is_member) {
-                irc_tx.send(ToIrc::Join(format!("#{}", channel.name))).unwrap();
-            }
+            // auto-join channels the bot has previously been invited to
+            irc_init_tx.complete(IrcInit {
+                channels: cli.get_channels().into_iter()
+                    .filter(|c| c.is_member)
+                    .map(|c| format!("#{}", c.name))
+                    .collect()
+            });
 
             let user_id = cli.get_user_id(&c.slack_user).expect("user id of Slack user").clone();
             let bot_channel = cli.im_open(&user_id).expect("IM channel with Slack bot").channel.id;
@@ -484,9 +496,12 @@ fn main() {
         thread::Builder::new().name("irc".into()).spawn(move || {
             let nick_to_chan = Arc::new(Mutex::new(MultiMap::<String, String>::new()));
 
+            let init = irc_init_rx.wait().expect("IRC initialization");
+
             let config = irc::client::data::Config {
                 nickname: Some(c.irc_nick.clone()),
                 server: Some(c.irc_server.clone()),
+                channels: Some(init.channels),
                 port: c.irc_port,
                 password: c.irc_password.clone(),
                 use_ssl: c.irc_ssl.or(Some(true)),
