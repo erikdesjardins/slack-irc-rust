@@ -11,6 +11,7 @@ extern crate rustc_serialize;
 extern crate multimap;
 extern crate time;
 
+use std::env;
 use std::fmt::Debug;
 use std::collections::HashMap;
 use std::thread;
@@ -336,7 +337,8 @@ fn main() {
 
     let c: Arc<Config> = {
         let mut s: String = String::new();
-        File::open(&"config.toml").and_then(|mut f| f.read_to_string(&mut s)).unwrap();
+        let file_path = env::args().skip(1).next().unwrap_or("config.toml".into());
+        File::open(file_path).and_then(|mut f| f.read_to_string(&mut s)).unwrap();
         toml::decode_str::<Config>(&s).expect("parse config").into()
     };
 
