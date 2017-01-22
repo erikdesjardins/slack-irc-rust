@@ -239,9 +239,9 @@ fn parse_irc_text(text: &str) -> String {
 }
 
 impl<'a> slack::EventHandler for SlackHandler<'a> {
-    fn on_event(&mut self, cli: &mut slack::RtmClient, event: Result<&slack::Event, slack::Error>, raw_json: &str) {
+    fn on_event(&mut self, cli: &mut slack::RtmClient, event: Result<slack::Event, slack::Error>, raw_json: &str) {
         match event {
-            Ok(&slack::Event::Message(ref message)) => match message {
+            Ok(slack::Event::Message(ref message)) => match message {
                 &slack::Message::Standard { channel: Some(ref channel), user: Some(ref user), text: Some(ref text), .. } if user == self.user_id => {
                     lazy_static! {
                         static ref PM_RE: Regex = Regex::new(r"^(\S+):\s+(.+)").unwrap();
@@ -276,10 +276,10 @@ impl<'a> slack::EventHandler for SlackHandler<'a> {
                     debug!("[SLACK] {:?}", event);
                 },
             },
-            Ok(&slack::Event::PresenceChange { ref user, ref presence }) if user == self.user_id => {
+            Ok(slack::Event::PresenceChange { ref user, ref presence }) if user == self.user_id => {
                 self.irc_tx.send(ToIrc::Away(presence != "active")).unwrap();
             },
-            Ok(&slack::Event::ChannelJoined { ref channel }) => {
+            Ok(slack::Event::ChannelJoined { ref channel }) => {
                 if cli.get_channels().into_iter().find(|c| c.id == channel.id).is_none() {
                     // we haven't seen this channel before, so update channels
                     cli.update_channels().expect("updating channels");
@@ -288,7 +288,7 @@ impl<'a> slack::EventHandler for SlackHandler<'a> {
                 }
                 self.irc_tx.send(ToIrc::Join(format!("#{}", channel.name))).unwrap();
             },
-            Ok(&slack::Event::ChannelLeft { ref channel }) => {
+            Ok(slack::Event::ChannelLeft { ref channel }) => {
                 self.irc_tx.send(ToIrc::Part(format!("#{}", get_channel_with_id(cli, channel).expect("channel with id").name))).unwrap();
             },
             evt => {
