@@ -552,7 +552,7 @@ fn main() {
                                 {
                                     let mut nick_to_chan = nick_to_chan.lock().unwrap();
                                     for nick in &nicks {
-                                        if let Some(mut v) = nick_to_chan.get_vec_mut(nick) {
+                                        if let Some(v) = nick_to_chan.get_vec_mut(nick) {
                                             v.retain(|c| !chans.contains(c));
                                         }
                                     }
@@ -575,7 +575,7 @@ fn main() {
                             Command::PART(channels, reason) => {
                                 let chans = channels.split(",").map(Into::into).collect::<Vec<_>>();
 
-                                if let Some(mut v) = nick_to_chan.lock().unwrap().get_vec_mut(&sender) {
+                                if let Some(v) = nick_to_chan.lock().unwrap().get_vec_mut(&sender) {
                                     v.retain(|c| !chans.contains(c));
                                 }
 
@@ -597,7 +597,7 @@ fn main() {
                                     match nick_to_chan.entry(nick.clone()) {
                                         multimap::Entry::Occupied(mut e) => {
                                             warn!("'{}' changed nick to extant nick '{}'", sender, nick);
-                                            let mut v_ = e.get_vec_mut();
+                                            let v_ = e.get_vec_mut();
                                             v_.clear();
                                             v_.append(&mut v);
                                         },
