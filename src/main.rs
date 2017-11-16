@@ -308,7 +308,7 @@ impl<'a> slack::EventHandler for SlackHandler<'a> {
 
 fn post_message(cli: &slack::RtmClient, token: &str, to: &str, text: &str, username: Option<&str>) {
     let to: &str = if to.starts_with("#") {
-        match cli.get_channel_id(&to[1..]) {
+        match cli.get_channel_id(&to[1..].to_lowercase()) {
             Some(id) => id,
             None => {
                 error!("Failed to find channel '{}'", &to[1..]);
@@ -397,7 +397,7 @@ fn main() {
                 match msg {
                     ToSlack::Message { to, from, msg } => {
                         let to: &str = if to.starts_with("#") {
-                            match cli.get_channel_id(&to[1..]) {
+                            match cli.get_channel_id(&to[1..].to_lowercase()) {
                                 Some(ref id) => id,
                                 None => return,
                             }
@@ -411,7 +411,7 @@ fn main() {
                         if let Some(by) = by {
                             post_message(&cli, &c.slack_token, &chan, &format!("*{}* has changed the topic", by), None);
                         }
-                        log_err(cli.set_topic(&chan, &topic.unwrap_or("".into()).chars().take(250).collect::<String>()));
+                        log_err(cli.set_topic(&chan.to_lowercase(), &topic.unwrap_or("".into()).chars().take(250).collect::<String>()));
                     },
                     ToSlack::Kick { by, chans, nicks, reason } => {
                         let reason = &reason.unwrap_or("".into());
