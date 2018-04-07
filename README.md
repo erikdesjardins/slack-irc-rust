@@ -4,7 +4,7 @@ Rust port of [erikdesjardins/slack-irc](https://github.com/erikdesjardins/slack-
 
 ## Usage
 
-- Compile from source with `cargo build --release` (if you don't have a Rust toolchain installed, use [rustup](https://github.com/rust-lang-nursery/rustup.rs))
+- Linux binaries are available on the [releases page](https://github.com/erikdesjardins/slack-irc-rust/releases); for everything else, build from source.
 - Run with `./slack_irc_rust path/to/config.toml` (defaults to `config.toml` in the CWD)
   - see `example_config.toml`
 
