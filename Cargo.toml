@@ -1,6 +1,6 @@
 [package]
 name = "slack_irc_rust"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Erik <erikdesjardins@users.noreply.github.com>"]
 
 [dependencies]
