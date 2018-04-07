@@ -348,7 +348,8 @@ fn main() {
     let c: Arc<Config> = {
         let mut s: String = String::new();
         let file_path = env::args().skip(1).next().unwrap_or("config.toml".into());
-        File::open(file_path).and_then(|mut f| f.read_to_string(&mut s)).unwrap();
+        let mut f = File::open(&file_path).expect(&format!("load config file {}", file_path));
+        f.read_to_string(&mut s).expect("reading from config file");
         toml::decode_str::<Config>(&s).expect("parse config").into()
     };
 
