@@ -365,12 +365,12 @@ fn main() {
             cli.login().expect("logging into Slack");
 
             // auto-join channels the bot has previously been invited to
-            irc_init_tx.complete(IrcInit {
+            irc_init_tx.send(IrcInit {
                 channels: cli.get_channels().into_iter()
                     .filter(|c| c.is_member)
                     .map(|c| format!("#{}", c.name))
                     .collect()
-            });
+            }).unwrap();
 
             let user_id = cli.get_user_id(&c.slack_user).expect("user id of Slack user").clone();
             let bot_channel = cli.im_open(&user_id).expect("IM channel with Slack bot").channel.id;
